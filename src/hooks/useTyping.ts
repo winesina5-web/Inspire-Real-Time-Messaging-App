@@ -8,6 +8,7 @@ export function useTyping(partnerId: string) {
   const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const sendDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+  const channelReadyRef = useRef(false);
 
   useEffect(() => {
     if (!user || !partnerId || !isConfigured) return;
@@ -26,13 +27,16 @@ export function useTyping(partnerId: string) {
           }, 3000);
         }
       })
-      .subscribe();
+      .subscribe((status) => {
+        channelReadyRef.current = status === 'SUBSCRIBED';
+      });
 
     return () => {
       if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
       if (sendDebounceRef.current) clearTimeout(sendDebounceRef.current);
       sendDebounceRef.current = null;
       channelRef.current = null;
+      channelReadyRef.current = false;
       supabase.removeChannel(channel);
     };
   }, [user, partnerId]);
@@ -43,7 +47,7 @@ export function useTyping(partnerId: string) {
     if (sendDebounceRef.current) return;
 
     const channel = channelRef.current;
-    if (!channel) return;
+    if (!channel || !channelReadyRef.current) return;
 
     channel.send({
       type: 'broadcast',
