@@ -5,15 +5,15 @@ import { Avatar } from '../../components/Avatar';
 import { useToast } from '../../components/Toast';
 import { Profile } from '../../types';
 import { supabase, isConfigured } from '../../lib/supabaseClient';
-import { DEMO_PROFILES } from '../../hooks/useAuth';
+import { DEV_PREVIEW_PROFILES } from '../../hooks/useAuth';
 
 export const AdminUsersPage: React.FC = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
 
   const [users, setUsers] = useState<Profile[]>([
-    DEMO_PROFILES.user,
-    DEMO_PROFILES.admin,
+    DEV_PREVIEW_PROFILES.user,
+    DEV_PREVIEW_PROFILES.admin,
     {
       id: 'usr_jordan',
       username: 'jordan_ai',

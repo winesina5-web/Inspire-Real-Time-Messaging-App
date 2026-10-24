@@ -1,388 +1,521 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BottomNav } from '../components/BottomNav';
 import { Avatar } from '../components/Avatar';
 import { useAuth } from '../hooks/useAuth';
 import { useToast } from '../components/Toast';
 import { ChannelSubscription, ChannelPost } from '../types';
-
-const SEED_CHANNELS: ChannelSubscription[] = [
-  {
-    id: 'chn_inspire_official',
-    owner_id: 'usr_admin',
-    name: 'Inspire Official Announcements 📣',
-    description: 'Product updates, real-time architecture releases, and feature rollouts.',
-    avatar_url: null,
-    subscriber_count: 1420,
-    is_public: true,
-    is_subscribed: true,
-    created_at: '2026-01-01T00:00:00Z',
-  },
-  {
-    id: 'chn_tech_radar',
-    owner_id: 'usr_jordan',
-    name: 'Cloudflare & Distributed Web 🌐',
-    description: 'Deep dives into Cloudflare Workers AI, R2 storage, and edge computing.',
-    avatar_url: null,
-    subscriber_count: 865,
-    is_public: true,
-    is_subscribed: true,
-    created_at: '2026-02-10T10:00:00Z',
-  },
-  {
-    id: 'chn_ui_design',
-    owner_id: 'usr_maya',
-    name: 'Design Systems & Micro-Interactions 🎨',
-    description: 'Color tokens, typography, dark mode parity, and motion polish.',
-    avatar_url: null,
-    subscriber_count: 530,
-    is_public: true,
-    is_subscribed: false,
-    created_at: '2026-03-01T12:00:00Z',
-  },
-];
-
-const SEED_POSTS: Record<string, ChannelPost[]> = {
-  chn_inspire_official: [
-    {
-      id: 'post_101',
-      channel_id: 'chn_inspire_official',
-      content: '🚀 Inspire Wave 2 is live! We have introduced 55+ new ultra-advanced features: threaded group replies, custom emoji reactions, smart compose ghost-text autocomplete, in-chat bill splitting, and collaborative shared notes.',
-      media_url: 'https://images.unsplash.com/photo-1550745165-9bc0b252726f?w=800&auto=format&fit=crop&q=80',
-      message_type: 'image',
-      created_at: new Date(Date.now() - 3600000 * 3).toISOString(),
-      view_count: 1240,
-      reaction_count: 342,
-      reactions: { '🔥': 180, '🎉': 120, '❤️': 42 },
-      my_reaction: '🔥',
-    },
-    {
-      id: 'post_102',
-      channel_id: 'chn_inspire_official',
-      content: '⚡ Privacy Update: Secret Chats and Incognito Read Mode are now fully supported across all devices, ensuring zero read-receipt leakage whenever enabled.',
-      media_url: null,
-      message_type: 'text',
-      created_at: new Date(Date.now() - 3600000 * 18).toISOString(),
-      view_count: 980,
-      reaction_count: 156,
-      reactions: { '👍': 90, '✨': 66 },
-      my_reaction: null,
-    },
-  ],
-  chn_tech_radar: [
-    {
-      id: 'post_201',
-      channel_id: 'chn_tech_radar',
-      content: 'Using native R2 bucket bindings inside Cloudflare Workers guarantees zero egress cost while providing sub-50ms signed media downloads for videos and voice notes.',
-      media_url: null,
-      message_type: 'text',
-      created_at: new Date(Date.now() - 3600000 * 8).toISOString(),
-      view_count: 420,
-      reaction_count: 88,
-      reactions: { '💡': 65, '🚀': 23 },
-      my_reaction: null,
-    },
-  ],
-};
+import { supabase, isConfigured } from '../lib/supabaseClient';
 
 export const ChannelsPage: React.FC = () => {
   const { user } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
 
-  const [channels, setChannels] = useState<ChannelSubscription[]>(SEED_CHANNELS);
-  const [selectedChannelId, setSelectedChannelId] = useState<string>('chn_inspire_official');
+  const [channels, setChannels] = useState<ChannelSubscription[]>([]);
+  const [selectedChannelId, setSelectedChannelId] = useState<string | null>(null);
+  const [posts, setPosts] = useState<ChannelPost[]>([]);
   const [activeTab, setActiveTab] = useState<'subscribed' | 'discover'>('subscribed');
   const [searchQuery, setSearchQuery] = useState('');
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showPostModal, setShowPostModal] = useState(false);
   const [newChannelName, setNewChannelName] = useState('');
   const [newChannelDesc, setNewChannelDesc] = useState('');
+  const [newPostContent, setNewPostContent] = useState('');
+  const [newPostImage, setNewPostImage] = useState('');
+  const [loading, setLoading] = useState(true);
 
-  const activeChannel = channels.find((c) => c.id === selectedChannelId) || channels[0];
-  const channelPosts = SEED_POSTS[selectedChannelId] || [];
+  // Load channels and user subscriptions
+  const loadChannels = async () => {
+    if (!user) return;
+    setLoading(true);
 
-  const handleToggleSubscribe = (channelId: string) => {
-    setChannels((prev) =>
-      prev.map((c) => {
-        if (c.id === channelId) {
-          const next = !c.is_subscribed;
-          toast(next ? `Subscribed to ${c.name}` : `Unsubscribed from ${c.name}`, 'info');
-          return {
-            ...c,
-            is_subscribed: next,
-            subscriber_count: c.subscriber_count + (next ? 1 : -1),
-          };
+    if (isConfigured) {
+      try {
+        const { data: channelRows, error } = await supabase
+          .from('channel_subscriptions')
+          .select('*')
+          .order('subscriber_count', { ascending: false });
+
+        if (error) {
+          console.warn('Channel fetch error:', error.message);
+        } else if (channelRows) {
+          // Check user memberships
+          const { data: memberRows } = await supabase
+            .from('channel_members')
+            .select('channel_id')
+            .eq('user_id', user.id);
+
+          const mySubIds = new Set((memberRows || []).map((m: any) => m.channel_id));
+
+          const formatted: ChannelSubscription[] = channelRows.map((ch: any) => ({
+            id: ch.id,
+            owner_id: ch.owner_id,
+            name: ch.name,
+            description: ch.description,
+            avatar_url: ch.avatar_url,
+            subscriber_count: ch.subscriber_count || 0,
+            is_public: ch.is_public,
+            is_subscribed: mySubIds.has(ch.id) || ch.owner_id === user.id,
+            created_at: ch.created_at,
+          }));
+
+          setChannels(formatted);
+          if (formatted.length > 0 && !selectedChannelId) {
+            setSelectedChannelId(formatted[0].id);
+          }
         }
-        return c;
-      })
-    );
+      } catch (err) {
+        console.warn('Error loading channels:', err);
+      } finally {
+        setLoading(false);
+      }
+    } else {
+      setLoading(false);
+    }
   };
 
-  const handleReactPost = (postId: string, emoji: string) => {
-    toast(`Reacted with ${emoji}`, 'info');
-  };
+  useEffect(() => {
+    loadChannels();
+  }, [user]);
 
-  const handleCreateChannel = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newChannelName.trim()) return;
+  // Load posts for the selected channel
+  useEffect(() => {
+    if (!selectedChannelId) return;
 
-    const newChan: ChannelSubscription = {
-      id: `chn_${Date.now()}`,
-      owner_id: user?.id || 'me',
-      name: newChannelName.trim(),
-      description: newChannelDesc.trim() || 'Broadcast channel on Inspire',
-      subscriber_count: 1,
-      is_public: true,
-      is_subscribed: true,
-      created_at: new Date().toISOString(),
+    const loadPosts = async () => {
+      if (isConfigured) {
+        try {
+          const { data, error } = await supabase
+            .from('channel_posts')
+            .select('*')
+            .eq('channel_id', selectedChannelId)
+            .order('created_at', { ascending: false });
+
+          if (!error && data) {
+            setPosts(
+              data.map((p: any) => ({
+                id: p.id,
+                channel_id: p.channel_id,
+                content: p.content,
+                media_url: p.media_url,
+                message_type: p.message_type,
+                created_at: p.created_at,
+                view_count: 1,
+                reaction_count: 0,
+                reactions: {},
+                my_reaction: null,
+              }))
+            );
+          }
+        } catch (err) {
+          console.warn('Error loading channel posts:', err);
+        }
+      }
     };
 
-    setChannels((prev) => [newChan, ...prev]);
-    setSelectedChannelId(newChan.id);
+    loadPosts();
+  }, [selectedChannelId]);
+
+  const handleToggleSubscribe = async (channelId: string, currentStatus: boolean) => {
+    if (!user) return;
+
+    if (isConfigured) {
+      try {
+        if (currentStatus) {
+          await supabase
+            .from('channel_members')
+            .delete()
+            .eq('channel_id', channelId)
+            .eq('user_id', user.id);
+        } else {
+          await supabase.from('channel_members').insert({
+            channel_id: channelId,
+            user_id: user.id,
+          });
+        }
+      } catch (err) {
+        console.warn('Subscription toggle error:', err);
+      }
+    }
+
+    setChannels((prev) =>
+      prev.map((c) =>
+        c.id === channelId
+          ? {
+              ...c,
+              is_subscribed: !currentStatus,
+              subscriber_count: currentStatus ? Math.max(0, c.subscriber_count - 1) : c.subscriber_count + 1,
+            }
+          : c
+      )
+    );
+    toast(currentStatus ? 'Unsubscribed from channel' : 'Subscribed to channel updates! 🔔', 'success');
+  };
+
+  const handleCreateChannel = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newChannelName.trim() || !user) return;
+
+    const newChannelData = {
+      owner_id: user.id,
+      name: newChannelName.trim(),
+      description: newChannelDesc.trim() || null,
+      is_public: true,
+      subscriber_count: 1,
+    };
+
+    if (isConfigured) {
+      try {
+        const { data, error } = await supabase
+          .from('channel_subscriptions')
+          .insert(newChannelData)
+          .select()
+          .single();
+
+        if (error) {
+          toast(error.message, 'error');
+          return;
+        }
+
+        if (data) {
+          // Auto add owner as member
+          await supabase.from('channel_members').insert({
+            channel_id: data.id,
+            user_id: user.id,
+          });
+
+          const created: ChannelSubscription = {
+            id: data.id,
+            owner_id: data.owner_id,
+            name: data.name,
+            description: data.description,
+            avatar_url: data.avatar_url,
+            subscriber_count: 1,
+            is_public: true,
+            is_subscribed: true,
+            created_at: data.created_at,
+          };
+          setChannels((prev) => [created, ...prev]);
+          setSelectedChannelId(data.id);
+        }
+      } catch (err) {
+        console.warn('Channel creation error:', err);
+      }
+    }
+
     setShowCreateModal(false);
     setNewChannelName('');
     setNewChannelDesc('');
-    toast('Public Channel created!', 'success');
+    toast('Channel created successfully!', 'success');
   };
+
+  const handleCreatePost = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newPostContent.trim() || !selectedChannelId) return;
+
+    const postData = {
+      channel_id: selectedChannelId,
+      content: newPostContent.trim(),
+      media_url: newPostImage.trim() || null,
+      message_type: newPostImage.trim() ? 'image' : 'text',
+    };
+
+    if (isConfigured) {
+      try {
+        const { data, error } = await supabase
+          .from('channel_posts')
+          .insert(postData)
+          .select()
+          .single();
+
+        if (!error && data) {
+          const newPost: ChannelPost = {
+            id: data.id,
+            channel_id: data.channel_id,
+            content: data.content,
+            media_url: data.media_url,
+            message_type: data.message_type,
+            created_at: data.created_at,
+            view_count: 1,
+            reaction_count: 0,
+            reactions: {},
+            my_reaction: null,
+          };
+          setPosts((prev) => [newPost, ...prev]);
+        }
+      } catch (err) {
+        console.warn('Create post error:', err);
+      }
+    }
+
+    setShowPostModal(false);
+    setNewPostContent('');
+    setNewPostImage('');
+    toast('Post published to channel subscribers!', 'success');
+  };
+
+  const selectedChannel = channels.find((c) => c.id === selectedChannelId);
+  const isOwner = selectedChannel?.owner_id === user?.id;
+
+  const displayedChannels = channels.filter((c) => {
+    const matchesSearch = c.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                          (c.description || '').toLowerCase().includes(searchQuery.toLowerCase());
+    if (!matchesSearch) return false;
+    return activeTab === 'subscribed' ? c.is_subscribed : true;
+  });
 
   return (
     <div className="min-h-screen bg-white dark:bg-[#0B0F1A] text-black dark:text-white pb-24">
-      {/* Top Header */}
-      <header className="sticky top-0 z-30 bg-white/95 dark:bg-[#0B0F1A]/95 backdrop-blur-md border-b border-[#E5E7EB] dark:border-[#2A3348] px-4 py-3">
+      {/* Header */}
+      <header className="sticky top-0 z-30 bg-white/95 dark:bg-[#0B0F1A]/95 backdrop-blur-md border-b border-[#E5E7EB] dark:border-[#2A3348] px-4 py-3.5">
         <div className="max-w-md mx-auto flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <span className="text-xl">📢</span>
+          <div className="flex items-center space-x-2.5">
+            <div className="w-9 h-9 rounded-2xl bg-[#0E2A6E] text-[#FFD700] flex items-center justify-center text-lg font-black shadow-sm">
+              📣
+            </div>
             <h1 className="text-xl font-extrabold text-black dark:text-white">
-              Broadcast Channels
+              Channels
             </h1>
           </div>
           <button
             onClick={() => setShowCreateModal(true)}
-            className="px-3 py-1 rounded-full bg-[#0E2A6E] text-white text-xs font-bold shadow-xs active:scale-95"
+            className="px-3.5 py-1.5 rounded-full bg-[#0E2A6E] text-white text-xs font-bold shadow-sm active:scale-95 hover:bg-[#081B47]"
           >
             + Create
           </button>
         </div>
+      </header>
 
-        {/* Tab Switcher */}
-        <div className="max-w-md mx-auto mt-2.5 flex p-1 bg-gray-100 dark:bg-gray-800 rounded-xl">
+      {/* Tabs */}
+      <div className="max-w-md mx-auto px-4 pt-3">
+        <div className="flex rounded-2xl bg-gray-100 dark:bg-gray-800 p-1">
           <button
             onClick={() => setActiveTab('subscribed')}
-            className={`flex-1 py-1 rounded-lg text-xs font-bold transition-all ${
-              activeTab === 'subscribed'
-                ? 'bg-white dark:bg-[#161B2B] text-black dark:text-white shadow-xs'
-                : 'text-gray-500'
+            className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition-all ${
+              activeTab === 'subscribed' ? 'bg-white dark:bg-[#161B2B] text-black dark:text-white shadow-xs' : 'text-gray-500'
             }`}
           >
             Subscribed
           </button>
           <button
             onClick={() => setActiveTab('discover')}
-            className={`flex-1 py-1 rounded-lg text-xs font-bold transition-all ${
-              activeTab === 'discover'
-                ? 'bg-white dark:bg-[#161B2B] text-black dark:text-white shadow-xs'
-                : 'text-gray-500'
+            className={`flex-1 py-1.5 rounded-xl text-xs font-bold transition-all ${
+              activeTab === 'discover' ? 'bg-white dark:bg-[#161B2B] text-black dark:text-white shadow-xs' : 'text-gray-500'
             }`}
           >
-            Discover Channels 🔍
+            Discover All
           </button>
         </div>
-      </header>
+      </div>
 
+      {/* Main Content */}
       <main className="max-w-md mx-auto px-4 py-4 space-y-4">
-        {activeTab === 'subscribed' ? (
-          <>
-            {/* Channel Selection Horizontal Pills */}
-            <div className="flex items-center space-x-2 overflow-x-auto no-scrollbar pb-1">
-              {channels
-                .filter((c) => c.is_subscribed)
-                .map((c) => (
-                  <button
-                    key={c.id}
-                    onClick={() => setSelectedChannelId(c.id)}
-                    className={`flex-shrink-0 px-3.5 py-1.5 rounded-full text-xs font-bold transition-all ${
-                      selectedChannelId === c.id
-                        ? 'bg-[#0E2A6E] text-white dark:bg-[#3D6FE0]'
-                        : 'bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-300'
-                    }`}
-                  >
-                    {c.name}
-                  </button>
-                ))}
-            </div>
-
-            {/* Active Channel Header Card */}
-            {activeChannel && (
-              <div className="p-4 rounded-3xl bg-gray-50 dark:bg-[#161B2B] border border-[#E5E7EB] dark:border-[#2A3348] shadow-xs space-y-2">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="font-extrabold text-base text-black dark:text-white">
-                      {activeChannel.name}
-                    </h3>
-                    <p className="text-xs text-[#4B5563] dark:text-[#9CA3AF]">
-                      {activeChannel.subscriber_count.toLocaleString()} subscribers • One-way broadcast
-                    </p>
-                  </div>
-                  <button
-                    onClick={() => handleToggleSubscribe(activeChannel.id)}
-                    className="px-3 py-1 rounded-full border border-gray-300 dark:border-gray-700 text-xs font-bold text-gray-600 dark:text-gray-300"
-                  >
-                    {activeChannel.is_subscribed ? 'Following' : '+ Follow'}
-                  </button>
-                </div>
-                <p className="text-xs text-gray-600 dark:text-gray-300 leading-relaxed">
-                  {activeChannel.description}
-                </p>
-              </div>
-            )}
-
-            {/* Posts Feed */}
-            <div className="space-y-4 pt-2">
-              <span className="text-xs font-black uppercase tracking-wider text-gray-400">
-                Recent Broadcasts
-              </span>
-
-              {channelPosts.length === 0 ? (
-                <div className="text-center py-10 text-xs text-gray-400">
-                  No broadcasts posted in this channel yet.
-                </div>
-              ) : (
-                channelPosts.map((post) => (
-                  <div
-                    key={post.id}
-                    className="p-4 rounded-3xl bg-white dark:bg-[#161B2B] border border-[#E5E7EB] dark:border-[#2A3348] shadow-sm space-y-3"
-                  >
-                    {post.media_url && (
-                      <img
-                        src={post.media_url}
-                        alt="Channel Media"
-                        className="w-full max-h-56 object-cover rounded-2xl"
-                      />
-                    )}
-                    <p className="text-xs leading-relaxed text-black dark:text-white whitespace-pre-wrap">
-                      {post.content}
-                    </p>
-
-                    {/* Footer: View count & Reactions */}
-                    <div className="flex items-center justify-between pt-2 border-t border-gray-100 dark:border-gray-800 text-[11px] text-gray-500">
-                      <span className="font-semibold">👁️ {post.view_count} views</span>
-                      <div className="flex items-center space-x-1.5">
-                        {post.reactions &&
-                          Object.entries(post.reactions).map(([em, cnt]) => (
-                            <button
-                              key={em}
-                              onClick={() => handleReactPost(post.id, em)}
-                              className="px-2 py-0.5 rounded-full bg-gray-100 dark:bg-gray-800 hover:bg-[#FFD700]/20 font-bold flex items-center space-x-1"
-                            >
-                              <span>{em}</span>
-                              <span className="text-[10px]">{cnt}</span>
-                            </button>
-                          ))}
-                      </div>
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </>
+        {loading ? (
+          <div className="flex items-center justify-center py-16">
+            <div className="w-8 h-8 border-3 border-[#0E2A6E] border-t-transparent rounded-full animate-spin" />
+          </div>
+        ) : displayedChannels.length === 0 ? (
+          <div className="text-center py-16 text-gray-500 text-xs space-y-3">
+            <div className="text-4xl">📢</div>
+            <p className="font-semibold text-black dark:text-white">
+              {activeTab === 'subscribed' ? 'No subscribed channels' : 'No public channels found'}
+            </p>
+            <p className="text-gray-400">
+              {activeTab === 'subscribed'
+                ? 'Discover channels to get one-way broadcast updates or create your own.'
+                : 'Create the first broadcast channel to share news with your community.'}
+            </p>
+            <button
+              onClick={() => setShowCreateModal(true)}
+              className="mt-2 px-4 py-2 rounded-xl bg-[#0E2A6E] text-white font-bold"
+            >
+              Create a Channel
+            </button>
+          </div>
         ) : (
-          /* Discover Channels Tab */
-          <div className="space-y-3">
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search channels by topic or name…"
-              className="w-full px-4 py-2.5 rounded-2xl bg-gray-50 dark:bg-[#161B2B] border border-[#E5E7EB] dark:border-[#2A3348] text-xs font-semibold focus:outline-none"
-            />
+          <div className="space-y-4">
+            {/* Channel Cards */}
+            <div className="flex space-x-3 overflow-x-auto pb-2 scrollbar-none">
+              {displayedChannels.map((ch) => (
+                <button
+                  key={ch.id}
+                  onClick={() => setSelectedChannelId(ch.id)}
+                  className={`flex-shrink-0 p-3.5 rounded-2xl border text-left w-52 transition-all ${
+                    selectedChannelId === ch.id
+                      ? 'bg-[#0E2A6E] text-white border-[#0E2A6E] shadow-md'
+                      : 'bg-white dark:bg-[#161B2B] text-black dark:text-white border-[#E5E7EB] dark:border-[#2A3348]'
+                  }`}
+                >
+                  <div className="font-bold text-xs truncate">{ch.name}</div>
+                  <div className={`text-[10px] truncate mt-0.5 ${selectedChannelId === ch.id ? 'text-blue-200' : 'text-gray-400'}`}>
+                    {ch.description || 'Broadcast Channel'}
+                  </div>
+                  <div className={`text-[10px] font-bold mt-2 ${selectedChannelId === ch.id ? 'text-[#FFD700]' : 'text-[#0E2A6E] dark:text-[#3D6FE0]'}`}>
+                    {ch.subscriber_count} subscribers
+                  </div>
+                </button>
+              ))}
+            </div>
 
-            <div className="space-y-2.5 pt-2">
-              {channels
-                .filter((c) => c.name.toLowerCase().includes(searchQuery.toLowerCase()))
-                .map((c) => (
-                  <div
-                    key={c.id}
-                    className="p-3.5 rounded-2xl bg-white dark:bg-[#161B2B] border border-[#E5E7EB] dark:border-[#2A3348] flex items-center justify-between space-x-3"
-                  >
-                    <div className="min-w-0">
-                      <h4 className="font-extrabold text-xs text-black dark:text-white truncate">
-                        {c.name}
-                      </h4>
-                      <p className="text-[11px] text-gray-500 truncate">{c.description}</p>
-                      <span className="text-[10px] font-bold text-gray-400">
-                        {c.subscriber_count} subscribers
-                      </span>
-                    </div>
-
+            {/* Selected Channel Feed */}
+            {selectedChannel && (
+              <div className="space-y-4 pt-2">
+                <div className="p-4 rounded-3xl bg-gray-50 dark:bg-[#161B2B] border border-[#E5E7EB] dark:border-[#2A3348] flex items-center justify-between">
+                  <div>
+                    <h2 className="font-extrabold text-base">{selectedChannel.name}</h2>
+                    <p className="text-xs text-gray-500 mt-0.5">{selectedChannel.description}</p>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    {isOwner && (
+                      <button
+                        onClick={() => setShowPostModal(true)}
+                        className="px-3 py-1 rounded-full bg-[#FFD700] text-[#1A1A2E] text-xs font-black shadow-xs"
+                      >
+                        + Post
+                      </button>
+                    )}
                     <button
-                      onClick={() => handleToggleSubscribe(c.id)}
-                      className={`px-3 py-1.5 rounded-full text-xs font-bold transition-all ${
-                        c.is_subscribed
-                          ? 'border border-gray-300 dark:border-gray-700 text-gray-600 dark:text-gray-300'
-                          : 'bg-[#0E2A6E] text-white hover:bg-[#081B47]'
+                      onClick={() => handleToggleSubscribe(selectedChannel.id, Boolean(selectedChannel.is_subscribed))}
+                      className={`px-3 py-1 rounded-full text-xs font-bold ${
+                        selectedChannel.is_subscribed
+                          ? 'bg-gray-200 dark:bg-gray-700 text-gray-800 dark:text-gray-200'
+                          : 'bg-[#0E2A6E] text-white'
                       }`}
                     >
-                      {c.is_subscribed ? 'Following' : 'Follow'}
+                      {selectedChannel.is_subscribed ? 'Following' : 'Follow'}
                     </button>
                   </div>
-                ))}
-            </div>
+                </div>
+
+                {/* Posts Feed */}
+                {posts.length === 0 ? (
+                  <div className="text-center py-10 text-xs text-gray-400">
+                    No posts published in this channel yet.
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {posts.map((post) => (
+                      <div
+                        key={post.id}
+                        className="p-4 rounded-3xl bg-white dark:bg-[#161B2B] border border-[#E5E7EB] dark:border-[#2A3348] shadow-xs space-y-2.5"
+                      >
+                        <p className="text-xs leading-relaxed font-normal whitespace-pre-wrap">
+                          {post.content}
+                        </p>
+                        {post.media_url && (
+                          <img
+                            src={post.media_url}
+                            alt="Channel Post Media"
+                            className="rounded-2xl w-full max-h-60 object-cover"
+                          />
+                        )}
+                        <div className="text-[10px] text-gray-400 pt-1">
+                          {new Date(post.created_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         )}
       </main>
 
       {/* Create Channel Modal */}
       {showCreateModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in select-none">
-          <div className="w-full max-w-sm bg-white dark:bg-[#161B2B] rounded-3xl p-6 border border-[#E5E7EB] dark:border-[#2A3348] shadow-2xl animate-slide-up space-y-4">
-            <h3 className="font-extrabold text-base text-black dark:text-white">
-              Create Broadcast Channel
-            </h3>
-            <p className="text-xs text-gray-500">
-              Reach unlimited subscribers with one-way broadcasts, media, and reactions.
-            </p>
-
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-[#161B2B] rounded-3xl max-w-sm w-full p-6 border border-[#E5E7EB] dark:border-[#2A3348] shadow-2xl space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-extrabold text-base text-black dark:text-white">Create Broadcast Channel</h3>
+              <button onClick={() => setShowCreateModal(false)} className="text-gray-400 text-sm font-bold">✕</button>
+            </div>
             <form onSubmit={handleCreateChannel} className="space-y-3">
               <div>
-                <label className="block text-[11px] font-bold uppercase text-gray-500 mb-1">
-                  Channel Name
-                </label>
+                <label className="text-xs font-bold text-gray-700 dark:text-gray-300 block mb-1">Channel Name</label>
                 <input
                   type="text"
-                  required
                   value={newChannelName}
                   onChange={(e) => setNewChannelName(e.target.value)}
-                  placeholder="e.g. Design & Tech Dispatch 🚀"
-                  className="w-full px-3.5 py-2 rounded-xl bg-gray-50 dark:bg-gray-800 border border-[#E5E7EB] dark:border-[#2A3348] text-xs font-semibold focus:outline-none"
+                  placeholder="e.g. Inspire Product Updates"
+                  required
+                  className="w-full px-3.5 py-2 rounded-xl bg-[#F5F7FA] dark:bg-[#1A2234] border border-[#E5E7EB] dark:border-[#2A3348] text-xs font-semibold focus:outline-hidden focus:border-[#0E2A6E]"
                 />
               </div>
-
               <div>
-                <label className="block text-[11px] font-bold uppercase text-gray-500 mb-1">
-                  Description
-                </label>
+                <label className="text-xs font-bold text-gray-700 dark:text-gray-300 block mb-1">Description</label>
                 <textarea
-                  rows={2}
                   value={newChannelDesc}
                   onChange={(e) => setNewChannelDesc(e.target.value)}
                   placeholder="What is this channel about?"
-                  className="w-full px-3.5 py-2 rounded-xl bg-gray-50 dark:bg-gray-800 border border-[#E5E7EB] dark:border-[#2A3348] text-xs font-medium focus:outline-none resize-none"
+                  rows={3}
+                  className="w-full px-3.5 py-2 rounded-xl bg-[#F5F7FA] dark:bg-[#1A2234] border border-[#E5E7EB] dark:border-[#2A3348] text-xs font-semibold focus:outline-hidden focus:border-[#0E2A6E]"
                 />
               </div>
-
               <div className="flex space-x-2 pt-2">
                 <button
                   type="button"
                   onClick={() => setShowCreateModal(false)}
-                  className="flex-1 py-2.5 rounded-xl border border-gray-300 dark:border-gray-700 text-xs font-bold text-gray-600 dark:text-gray-300"
+                  className="flex-1 py-2 rounded-xl bg-gray-100 dark:bg-gray-800 text-xs font-bold"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 py-2.5 rounded-xl bg-[#0E2A6E] text-white text-xs font-bold hover:bg-[#081B47]"
+                  className="flex-1 py-2 rounded-xl bg-[#0E2A6E] text-white text-xs font-bold"
                 >
                   Create
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* New Post Modal */}
+      {showPostModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-[#161B2B] rounded-3xl max-w-sm w-full p-6 border border-[#E5E7EB] dark:border-[#2A3348] shadow-2xl space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-extrabold text-base text-black dark:text-white">Publish Channel Post</h3>
+              <button onClick={() => setShowPostModal(false)} className="text-gray-400 text-sm font-bold">✕</button>
+            </div>
+            <form onSubmit={handleCreatePost} className="space-y-3">
+              <div>
+                <label className="text-xs font-bold text-gray-700 dark:text-gray-300 block mb-1">Content</label>
+                <textarea
+                  value={newPostContent}
+                  onChange={(e) => setNewPostContent(e.target.value)}
+                  placeholder="Write message to channel subscribers..."
+                  rows={4}
+                  required
+                  className="w-full px-3.5 py-2 rounded-xl bg-[#F5F7FA] dark:bg-[#1A2234] border border-[#E5E7EB] dark:border-[#2A3348] text-xs font-semibold focus:outline-hidden focus:border-[#0E2A6E]"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-gray-700 dark:text-gray-300 block mb-1">Image URL (Optional)</label>
+                <input
+                  type="url"
+                  value={newPostImage}
+                  onChange={(e) => setNewPostImage(e.target.value)}
+                  placeholder="https://..."
+                  className="w-full px-3.5 py-2 rounded-xl bg-[#F5F7FA] dark:bg-[#1A2234] border border-[#E5E7EB] dark:border-[#2A3348] text-xs font-semibold focus:outline-hidden focus:border-[#0E2A6E]"
+                />
+              </div>
+              <div className="flex space-x-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setShowPostModal(false)}
+                  className="flex-1 py-2 rounded-xl bg-gray-100 dark:bg-gray-800 text-xs font-bold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2 rounded-xl bg-[#0E2A6E] text-white text-xs font-bold"
+                >
+                  Publish
                 </button>
               </div>
             </form>

@@ -9,23 +9,25 @@ interface AuthContextType {
   isLoading: boolean;
   isAuthenticated: boolean;
   isAdmin: boolean;
+  isSuspended: boolean;
+  isSupabaseConfigured: boolean;
   signUp: (email: string, password: string) => Promise<{ error: Error | null; needsEmailVerification?: boolean }>;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
   refreshProfile: () => Promise<void>;
   updateProfile: (updates: Partial<Profile>) => Promise<{ error: Error | null }>;
-  setDemoUser: (userType: 'user' | 'admin' | null) => void;
+  enableDevDemoMode: (role?: 'user' | 'admin') => void;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Deterministic mock seed users for offline / verification testing
-export const DEMO_PROFILES: Record<string, Profile> = {
+// Dev-only preview profiles (only permitted when import.meta.env.DEV is true)
+export const DEV_PREVIEW_PROFILES: Record<string, Profile> = {
   user: {
     id: '11111111-1111-4111-8111-111111111111',
     username: 'alex_dev',
     display_name: 'Alex Rivera',
-    bio: 'Building cool things with real-time tech 🚀',
+    bio: 'Building with real-time tech on Inspire 🚀',
     avatar_url: null,
     role: 'user',
     status: 'active',
@@ -36,7 +38,7 @@ export const DEMO_PROFILES: Record<string, Profile> = {
   admin: {
     id: '99999999-9999-4999-8999-999999999999',
     username: 'inspire_admin',
-    display_name: 'Sarah Chen (Admin)',
+    display_name: 'Sarah Chen (Platform Admin)',
     bio: 'Inspire Platform Security & Operations 🛡️',
     avatar_url: null,
     role: 'admin',
@@ -45,66 +47,67 @@ export const DEMO_PROFILES: Record<string, Profile> = {
     last_seen: new Date().toISOString(),
     created_at: '2025-11-01T10:00:00Z',
   },
-  unonboarded: {
-    id: '22222222-2222-4222-8222-222222222222',
-    username: null,
-    display_name: 'New Explorer',
-    bio: null,
-    avatar_url: null,
-    role: 'user',
-    status: 'active',
-    is_online: true,
-    last_seen: new Date().toISOString(),
-    created_at: new Date().toISOString(),
-  },
 };
 
 export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const [session, setSession] = useState<Session | null>(null);
   const [user, setUser] = useState<Profile | null>(() => {
+    // Only check local storage if explicitly saved during active development session
     if (localStorage.getItem('inspire_logged_out') === 'true') {
       return null;
     }
-    // Check local storage for persistent demo/cached profile
     const saved = localStorage.getItem('inspire_active_user');
-    if (saved) {
+    if (saved && isConfigured) {
       try {
         return JSON.parse(saved);
       } catch {
         return null;
       }
     }
-    // Default to the authenticated user for instant preview if not configured
-    return !isConfigured ? DEMO_PROFILES.user : null;
+    return null;
   });
   const [isLoading, setIsLoading] = useState<boolean>(true);
 
-  // Sync user changes to localStorage
+  // Sync user changes to localStorage only when authenticating
   useEffect(() => {
-    if (user) {
+    if (user && isConfigured) {
       localStorage.setItem('inspire_active_user', JSON.stringify(user));
-    } else {
+    } else if (!user) {
       localStorage.removeItem('inspire_active_user');
     }
   }, [user]);
 
-  const fetchProfile = useCallback(async (userId: string) => {
-    if (!isConfigured) return;
-    try {
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .maybeSingle();
+  /**
+   * Fetches the user profile with exponential retry to account for trigger latency on signup
+   */
+  const fetchProfile = useCallback(async (userId: string, retries = 3): Promise<Profile | null> => {
+    if (!isConfigured) return null;
 
-      if (error) {
-        console.warn('Error fetching profile from Supabase:', error);
-      } else if (data) {
-        setUser(data as Profile);
+    for (let attempt = 0; attempt < retries; attempt++) {
+      try {
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', userId)
+          .maybeSingle();
+
+        if (error) {
+          console.warn('Profile fetch warning:', error.message);
+        } else if (data) {
+          const profile = data as Profile;
+          setUser(profile);
+          return profile;
+        }
+
+        // Wait before retry if database trigger is still writing row
+        if (attempt < retries - 1) {
+          await new Promise((resolve) => setTimeout(resolve, 350 * (attempt + 1)));
+        }
+      } catch (err) {
+        console.warn('Profile fetch exception:', err);
       }
-    } catch (err) {
-      console.warn('Profile fetch exception:', err);
     }
+    return null;
   }, []);
 
   const refreshProfile = useCallback(async () => {
@@ -128,17 +131,17 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      async (_event, newSession) => {
-        setSession(newSession);
-        if (newSession?.user) {
-          await fetchProfile(newSession.user.id);
-        } else {
-          setUser(null);
-        }
-        setIsLoading(false);
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(async (_event, newSession) => {
+      setSession(newSession);
+      if (newSession?.user) {
+        await fetchProfile(newSession.user.id);
+      } else {
+        setUser(null);
       }
-    );
+      setIsLoading(false);
+    });
 
     return () => {
       subscription.unsubscribe();
@@ -147,21 +150,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const signUp = async (email: string, password: string) => {
     if (!isConfigured) {
-      // Offline/local demo signup simulation
-      const newProf: Profile = {
-        id: `usr_${Date.now()}`,
-        username: null,
-        display_name: email.split('@')[0],
-        bio: '',
-        avatar_url: null,
-        role: 'user',
-        status: 'active',
-        is_online: true,
-        last_seen: new Date().toISOString(),
-        created_at: new Date().toISOString(),
+      return {
+        error: new Error('Supabase is not configured. Please supply VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY in your environment.'),
       };
-      setUser(newProf);
-      return { error: null, needsEmailVerification: false };
     }
 
     try {
@@ -171,7 +162,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       });
 
       if (error) return { error };
+
       const needsEmailVerification = !data.session;
+      if (data.user && data.session) {
+        await fetchProfile(data.user.id);
+      }
+
       return { error: null, needsEmailVerification };
     } catch (err) {
       return { error: err as Error };
@@ -180,13 +176,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   const signIn = async (email: string, password: string) => {
     if (!isConfigured) {
-      // Check admin login convention
-      if (email.includes('admin')) {
-        setUser(DEMO_PROFILES.admin);
-      } else {
-        setUser(DEMO_PROFILES.user);
-      }
-      return { error: null };
+      return {
+        error: new Error('Supabase connection is not configured in .env. Real authentication requires Supabase.'),
+      };
     }
 
     try {
@@ -194,7 +186,9 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         email,
         password,
       });
+
       if (error) return { error };
+
       if (data.session?.user) {
         await fetchProfile(data.session.user.id);
       }
@@ -215,7 +209,12 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   };
 
   const updateProfile = async (updates: Partial<Profile>) => {
-    if (!user) return { error: new Error('No user logged in') };
+    if (!user) return { error: new Error('No authenticated user session.') };
+
+    // Prevent non-admin client from modifying security role or status directly
+    if (updates.role && updates.role !== user.role && user.role !== 'admin') {
+      return { error: new Error('Unauthorized role modification attempt.') };
+    }
 
     const updated = { ...user, ...updates };
     setUser(updated);
@@ -235,18 +234,18 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return { error: null };
   };
 
-  const setDemoUser = (userType: 'user' | 'admin' | null) => {
-    if (!userType) {
-      setUser(null);
-      localStorage.setItem('inspire_logged_out', 'true');
-    } else {
+  const enableDevDemoMode = (role: 'user' | 'admin' = 'user') => {
+    // Only allowed in development environment
+    if (import.meta.env.DEV) {
       localStorage.removeItem('inspire_logged_out');
-      setUser(DEMO_PROFILES[userType]);
+      setUser(DEV_PREVIEW_PROFILES[role]);
     }
   };
 
   const isAuthenticated = Boolean(user);
+  // Real authorization: role must strictly equal 'admin' from database profile
   const isAdmin = user?.role === 'admin';
+  const isSuspended = user?.status === 'suspended';
 
   return (
     <AuthContext.Provider
@@ -256,12 +255,14 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         isLoading,
         isAuthenticated,
         isAdmin,
+        isSuspended,
+        isSupabaseConfigured: isConfigured,
         signUp,
         signIn,
         signOut,
         refreshProfile,
         updateProfile,
-        setDemoUser,
+        enableDevDemoMode,
       }}
     >
       {children}

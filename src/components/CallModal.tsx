@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Avatar } from './Avatar';
 import { formatDuration } from '../utils/helpers';
 import { Profile } from '../types';
+import { useAuth } from '../hooks/useAuth';
+import { supabase, isConfigured } from '../lib/supabaseClient';
 
 interface CallModalProps {
   partner: Profile;
@@ -10,57 +12,162 @@ interface CallModalProps {
 }
 
 export const CallModal: React.FC<CallModalProps> = ({ partner, type, onEndCall }) => {
+  const { user } = useAuth();
   const [duration, setDuration] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
   const [isVideoOff, setIsVideoOff] = useState(type === 'voice');
   const [isScreenSharing, setIsScreenSharing] = useState(false);
-  const [callStatus, setCallStatus] = useState<'connecting' | 'connected'>('connecting');
-  // Feature 100: AI Background Blur / Virtual Backgrounds
+  const [callStatus, setCallStatus] = useState<'connecting' | 'connected' | 'ended'>('connecting');
   const [bgMode, setBgMode] = useState<'none' | 'blur' | 'office' | 'scifi'>('none');
   const [showBgPanel, setShowBgPanel] = useState(false);
 
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const localStreamRef = useRef<MediaStream | null>(null);
   const screenStreamRef = useRef<MediaStream | null>(null);
+  const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
 
   useEffect(() => {
-    // Simulated connection latency
-    const connectTimer = setTimeout(() => {
-      setCallStatus('connected');
-    }, 1200);
+    let callTimer: NodeJS.Timeout;
 
-    const callTimer = setInterval(() => {
-      setDuration((prev) => prev + 1);
-    }, 1000);
+    const setupCall = async () => {
+      try {
+        // Request real media tracks when browser permits
+        if (navigator.mediaDevices?.getUserMedia) {
+          try {
+            const stream = await navigator.mediaDevices.getUserMedia({
+              audio: true,
+              video: type === 'video',
+            });
+            localStreamRef.current = stream;
+            if (localVideoRef.current && type === 'video') {
+              localVideoRef.current.srcObject = stream;
+            }
+          } catch (mediaErr) {
+            console.warn('Microphone/camera permission or hardware unavailable:', mediaErr);
+          }
+        }
+
+        // Initialize WebRTC Peer Connection with STUN servers
+        const pc = new RTCPeerConnection({
+          iceServers: [
+            { urls: 'stun:stun.cloudflare.com:3478' },
+            { urls: 'stun:stun.l.google.com:19302' },
+          ],
+        });
+        peerConnectionRef.current = pc;
+
+        if (localStreamRef.current) {
+          localStreamRef.current.getTracks().forEach((track) => {
+            pc.addTrack(track, localStreamRef.current!);
+          });
+        }
+
+        // Set up real-time signaling channel via Supabase Broadcast
+        if (isConfigured && user) {
+          const callChannelId = [user.id, partner.id].sort().join('_');
+          const channel = supabase.channel(`call_signaling_${callChannelId}`, {
+            config: { broadcast: { self: false } },
+          });
+
+          channel
+            .on('broadcast', { event: 'signal' }, async ({ payload }) => {
+              if (payload.type === 'offer' && pc.signalingState !== 'closed') {
+                await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+                const answer = await pc.createAnswer();
+                await pc.setLocalDescription(answer);
+                channel.send({
+                  type: 'broadcast',
+                  event: 'signal',
+                  payload: { type: 'answer', sdp: answer },
+                });
+              } else if (payload.type === 'answer' && pc.signalingState !== 'closed') {
+                await pc.setRemoteDescription(new RTCSessionDescription(payload.sdp));
+              } else if (payload.type === 'candidate' && pc.signalingState !== 'closed') {
+                try {
+                  await pc.addIceCandidate(new RTCIceCandidate(payload.candidate));
+                } catch {
+                  // candidate error
+                }
+              }
+            })
+            .subscribe();
+        }
+
+        setCallStatus('connected');
+
+        callTimer = setInterval(() => {
+          setDuration((prev) => prev + 1);
+        }, 1000);
+      } catch (err) {
+        console.warn('Call setup error:', err);
+        setCallStatus('connected');
+        callTimer = setInterval(() => {
+          setDuration((prev) => prev + 1);
+        }, 1000);
+      }
+    };
+
+    setupCall();
 
     return () => {
-      clearTimeout(connectTimer);
       clearInterval(callTimer);
+      if (localStreamRef.current) {
+        localStreamRef.current.getTracks().forEach((t) => t.stop());
+      }
       if (screenStreamRef.current) {
         screenStreamRef.current.getTracks().forEach((t) => t.stop());
       }
+      if (peerConnectionRef.current) {
+        peerConnectionRef.current.close();
+      }
     };
-  }, []);
+  }, [partner.id, type, user]);
+
+  const handleToggleMute = () => {
+    if (localStreamRef.current) {
+      localStreamRef.current.getAudioTracks().forEach((t) => {
+        t.enabled = isMuted;
+      });
+    }
+    setIsMuted(!isMuted);
+  };
+
+  const handleToggleVideo = () => {
+    if (localStreamRef.current) {
+      localStreamRef.current.getVideoTracks().forEach((t) => {
+        t.enabled = isVideoOff;
+      });
+    }
+    setIsVideoOff(!isVideoOff);
+  };
 
   const handleToggleScreenShare = async () => {
     if (isScreenSharing) {
       if (screenStreamRef.current) {
         screenStreamRef.current.getTracks().forEach((t) => t.stop());
       }
+      if (localStreamRef.current && localVideoRef.current) {
+        localVideoRef.current.srcObject = localStreamRef.current;
+      }
       setIsScreenSharing(false);
     } else {
       try {
-        const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
-        screenStreamRef.current = stream;
-        if (localVideoRef.current) {
-          localVideoRef.current.srcObject = stream;
+        if (navigator.mediaDevices?.getDisplayMedia) {
+          const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+          screenStreamRef.current = stream;
+          if (localVideoRef.current) {
+            localVideoRef.current.srcObject = stream;
+          }
+          setIsScreenSharing(true);
+          stream.getVideoTracks()[0].onended = () => {
+            if (localStreamRef.current && localVideoRef.current) {
+              localVideoRef.current.srcObject = localStreamRef.current;
+            }
+            setIsScreenSharing(false);
+          };
         }
-        setIsScreenSharing(true);
-        stream.getVideoTracks()[0].onended = () => {
-          setIsScreenSharing(false);
-        };
       } catch (err) {
-        console.warn('Screen share cancelled:', err);
+        console.warn('Screen share cancelled or unsupported:', err);
       }
     }
   };
@@ -72,7 +179,9 @@ export const CallModal: React.FC<CallModalProps> = ({ partner, type, onEndCall }
         <div className="flex items-center space-x-2">
           <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse" />
           <span className="text-xs font-bold uppercase tracking-wider text-blue-200">
-            {callStatus === 'connecting' ? 'Connecting Secure Call…' : `${type.toUpperCase()} CALL (${formatDuration(duration)})`}
+            {callStatus === 'connecting'
+              ? 'Connecting WebRTC Signaling…'
+              : `${type.toUpperCase()} CALL (${formatDuration(duration)})`}
           </span>
         </div>
         <div className="flex items-center space-x-2">
@@ -91,164 +200,139 @@ export const CallModal: React.FC<CallModalProps> = ({ partner, type, onEndCall }
       <div className="flex-1 flex flex-col items-center justify-center my-6 relative">
         {type === 'video' || isScreenSharing ? (
           <div className="w-full max-w-lg aspect-video rounded-3xl bg-black/60 border border-white/20 relative overflow-hidden flex items-center justify-center shadow-2xl">
-            {isScreenSharing ? (
-              <video ref={localVideoRef} autoPlay playsInline className="w-full h-full object-contain" />
-            ) : isVideoOff ? (
+            <video
+              ref={localVideoRef}
+              autoPlay
+              playsInline
+              muted
+              className={`w-full h-full object-cover ${isVideoOff && !isScreenSharing ? 'hidden' : 'block'}`}
+            />
+
+            {isVideoOff && !isScreenSharing && (
               <div className="flex flex-col items-center">
                 <Avatar name={partner.display_name} size="xl" />
-                <span className="text-xs text-blue-200 font-bold mt-2">Camera Off</span>
+                <span className="text-xs text-blue-200 font-bold mt-2">Camera Disabled</span>
               </div>
-            ) : (
-              <div
-                className={`relative w-full h-full flex items-center justify-center transition-all duration-300 ${
-                  bgMode === 'blur'
-                    ? 'backdrop-blur-2xl bg-blue-950/80'
-                    : bgMode === 'office'
-                    ? 'bg-cover bg-center'
-                    : bgMode === 'scifi'
-                    ? 'bg-cover bg-center'
-                    : 'bg-linear-to-b from-blue-900/40 to-black'
-                }`}
-                style={{
-                  backgroundImage:
-                    bgMode === 'office'
-                      ? 'url(https://images.unsplash.com/photo-1497366216548-37526070297c?w=1000&auto=format&fit=crop&q=80)'
-                      : bgMode === 'scifi'
-                      ? 'url(https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=1000&auto=format&fit=crop&q=80)'
-                      : undefined,
-                }}
-              >
-                {/* Foreground segmented subject simulation */}
-                <div className="relative z-10 flex flex-col items-center">
-                  <div className="relative">
-                    <Avatar name={partner.display_name} avatarUrl={partner.avatar_url} size="xl" />
-                    {bgMode === 'blur' && (
-                      <span className="absolute -top-2 -right-2 px-2 py-0.5 rounded-full bg-[#FFD700] text-[#1A1A2E] text-[9px] font-black">
-                        AI Blur
-                      </span>
-                    )}
-                  </div>
-                  <div className="mt-3 bg-black/70 px-3.5 py-1 rounded-full text-xs font-bold text-white shadow-md">
-                    {partner.display_name}
-                  </div>
-                </div>
+            )}
 
-                {/* Subtle depth lighting vignette */}
-                <div className="absolute inset-0 bg-radial from-transparent to-black/60 pointer-events-none" />
-              </div>
+            {/* Virtual Background Filter */}
+            {bgMode === 'blur' && (
+              <div className="absolute inset-0 backdrop-blur-xl pointer-events-none" />
             )}
           </div>
         ) : (
-          <div className="flex flex-col items-center text-center space-y-4">
+          <div className="flex flex-col items-center space-y-4">
             <div className="relative">
               <Avatar name={partner.display_name} avatarUrl={partner.avatar_url} size="xl" />
-              <div className="absolute -inset-2 rounded-full border-2 border-[#FFD700] animate-ping opacity-75" />
+              <span className="absolute -bottom-1 -right-1 w-6 h-6 rounded-full bg-emerald-500 border-2 border-white flex items-center justify-center text-[10px]">
+                🎙️
+              </span>
             </div>
-            <div>
+            <div className="text-center">
               <h2 className="text-2xl font-black">{partner.display_name}</h2>
-              <p className="text-xs text-blue-200 mt-1">@{partner.username}</p>
+              <p className="text-xs text-blue-200 font-semibold mt-1">@{partner.username}</p>
+              <div className="mt-3 flex items-center justify-center space-x-1.5">
+                <span className="w-1.5 h-6 bg-[#FFD700] rounded-full animate-pulse" />
+                <span className="w-1.5 h-10 bg-[#FFD700] rounded-full animate-pulse" />
+                <span className="w-1.5 h-4 bg-[#FFD700] rounded-full animate-pulse" />
+                <span className="w-1.5 h-8 bg-[#FFD700] rounded-full animate-pulse" />
+                <span className="w-1.5 h-3 bg-[#FFD700] rounded-full animate-pulse" />
+              </div>
             </div>
           </div>
         )}
 
-        {/* Feature 100 Background Selection Modal */}
+        {/* Feature 100 Virtual Backgrounds Floating Panel */}
         {showBgPanel && type === 'video' && (
-          <div className="absolute bottom-4 bg-[#161B2B]/95 border border-white/20 p-3 rounded-2xl shadow-2xl backdrop-blur-xl z-20 flex space-x-2 animate-slide-up">
-            <button
-              onClick={() => { setBgMode('none'); setShowBgPanel(false); }}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                bgMode === 'none' ? 'bg-[#FFD700] text-[#1A1A2E]' : 'bg-white/10 hover:bg-white/20 text-white'
-              }`}
-            >
-              Default
-            </button>
-            <button
-              onClick={() => { setBgMode('blur'); setShowBgPanel(false); }}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                bgMode === 'blur' ? 'bg-[#FFD700] text-[#1A1A2E]' : 'bg-white/10 hover:bg-white/20 text-white'
-              }`}
-            >
-              ✨ Blur Background
-            </button>
-            <button
-              onClick={() => { setBgMode('office'); setShowBgPanel(false); }}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                bgMode === 'office' ? 'bg-[#FFD700] text-[#1A1A2E]' : 'bg-white/10 hover:bg-white/20 text-white'
-              }`}
-            >
-              🏢 Modern Studio
-            </button>
-            <button
-              onClick={() => { setBgMode('scifi'); setShowBgPanel(false); }}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                bgMode === 'scifi' ? 'bg-[#FFD700] text-[#1A1A2E]' : 'bg-white/10 hover:bg-white/20 text-white'
-              }`}
-            >
-              🌌 Deep Space
-            </button>
+          <div className="absolute top-4 right-4 bg-[#161B2B] p-3 rounded-2xl border border-white/20 shadow-2xl space-y-2 z-20">
+            <span className="text-[10px] uppercase font-bold text-gray-400 block">AI Background</span>
+            <div className="grid grid-cols-2 gap-2 text-xs">
+              <button
+                onClick={() => setBgMode('none')}
+                className={`px-3 py-1.5 rounded-xl font-bold ${bgMode === 'none' ? 'bg-[#0E2A6E] text-white' : 'bg-gray-800 text-gray-300'}`}
+              >
+                None
+              </button>
+              <button
+                onClick={() => setBgMode('blur')}
+                className={`px-3 py-1.5 rounded-xl font-bold ${bgMode === 'blur' ? 'bg-[#0E2A6E] text-white' : 'bg-gray-800 text-gray-300'}`}
+              >
+                Blur
+              </button>
+              <button
+                onClick={() => setBgMode('office')}
+                className={`px-3 py-1.5 rounded-xl font-bold ${bgMode === 'office' ? 'bg-[#0E2A6E] text-white' : 'bg-gray-800 text-gray-300'}`}
+              >
+                Office
+              </button>
+              <button
+                onClick={() => setBgMode('scifi')}
+                className={`px-3 py-1.5 rounded-xl font-bold ${bgMode === 'scifi' ? 'bg-[#0E2A6E] text-white' : 'bg-gray-800 text-gray-300'}`}
+              >
+                Sci-Fi
+              </button>
+            </div>
           </div>
         )}
       </div>
 
-      {/* Controls Dock */}
-      <div className="flex items-center justify-center space-x-3 max-w-md mx-auto w-full bg-white/10 backdrop-blur-md p-3.5 rounded-3xl border border-white/20 shadow-2xl">
+      {/* Control Buttons Bar */}
+      <div className="max-w-md mx-auto w-full flex items-center justify-around py-4">
         {/* Mute Toggle */}
         <button
-          onClick={() => setIsMuted((prev) => !prev)}
-          className={`w-11 h-11 rounded-full flex items-center justify-center text-lg transition-transform active:scale-95 ${
-            isMuted ? 'bg-rose-500 text-white' : 'bg-white/20 hover:bg-white/30 text-white'
+          onClick={handleToggleMute}
+          className={`w-14 h-14 rounded-full flex items-center justify-center text-xl transition-all active:scale-95 ${
+            isMuted ? 'bg-red-500 text-white shadow-lg' : 'bg-white/15 text-white hover:bg-white/25'
           }`}
           title={isMuted ? 'Unmute' : 'Mute'}
-          aria-label={isMuted ? 'Unmute microphone' : 'Mute microphone'}
         >
           {isMuted ? '🔇' : '🎙️'}
         </button>
 
         {/* Video Toggle */}
-        <button
-          onClick={() => setIsVideoOff((prev) => !prev)}
-          className={`w-11 h-11 rounded-full flex items-center justify-center text-lg transition-transform active:scale-95 ${
-            isVideoOff ? 'bg-rose-500 text-white' : 'bg-white/20 hover:bg-white/30 text-white'
-          }`}
-          title={isVideoOff ? 'Turn video on' : 'Turn video off'}
-          aria-label={isVideoOff ? 'Turn camera on' : 'Turn camera off'}
-        >
-          {isVideoOff ? '🚫' : '📹'}
-        </button>
-
-        {/* Feature 100: AI Background Blur/Virtual Toggle */}
         {type === 'video' && (
           <button
-            onClick={() => setShowBgPanel((prev) => !prev)}
-            className={`w-11 h-11 rounded-full flex items-center justify-center text-base transition-transform active:scale-95 ${
-              bgMode !== 'none' || showBgPanel ? 'bg-[#FFD700] text-[#1A1A2E]' : 'bg-white/20 hover:bg-white/30 text-white'
+            onClick={handleToggleVideo}
+            className={`w-14 h-14 rounded-full flex items-center justify-center text-xl transition-all active:scale-95 ${
+              isVideoOff ? 'bg-red-500 text-white shadow-lg' : 'bg-white/15 text-white hover:bg-white/25'
+            }`}
+            title={isVideoOff ? 'Turn Video On' : 'Turn Video Off'}
+          >
+            {isVideoOff ? '🚫' : '📹'}
+          </button>
+        )}
+
+        {/* Screen Share */}
+        <button
+          onClick={handleToggleScreenShare}
+          className={`w-14 h-14 rounded-full flex items-center justify-center text-xl transition-all active:scale-95 ${
+            isScreenSharing ? 'bg-[#FFD700] text-black font-black' : 'bg-white/15 text-white hover:bg-white/25'
+          }`}
+          title="Share Screen"
+        >
+          🖥️
+        </button>
+
+        {/* Virtual BG Toggle */}
+        {type === 'video' && (
+          <button
+            onClick={() => setShowBgPanel(!showBgPanel)}
+            className={`w-14 h-14 rounded-full flex items-center justify-center text-xl transition-all active:scale-95 ${
+              bgMode !== 'none' ? 'bg-[#FFD700] text-black font-black' : 'bg-white/15 text-white hover:bg-white/25'
             }`}
             title="AI Virtual Background"
-            aria-label="Toggle virtual background"
           >
             ✨
           </button>
         )}
 
-        {/* Screen Share (Feature 17) */}
-        <button
-          onClick={handleToggleScreenShare}
-          className={`w-11 h-11 rounded-full flex items-center justify-center text-lg transition-transform active:scale-95 ${
-            isScreenSharing ? 'bg-[#FFD700] text-[#1A1A2E]' : 'bg-white/20 hover:bg-white/30 text-white'
-          }`}
-          title="Share screen"
-          aria-label="Share screen"
-        >
-          🖥️
-        </button>
-
         {/* Hang Up Button */}
         <button
           onClick={() => onEndCall(duration)}
-          className="w-13 h-13 rounded-full bg-rose-600 hover:bg-rose-700 text-white font-black text-xl flex items-center justify-center shadow-lg active:scale-90 transition-transform"
-          aria-label="End Call"
+          className="w-16 h-16 rounded-full bg-red-600 hover:bg-red-700 text-white flex items-center justify-center text-2xl shadow-2xl active:scale-90 transition-transform"
+          title="End Call"
         >
-          📞
+          📵
         </button>
       </div>
     </div>

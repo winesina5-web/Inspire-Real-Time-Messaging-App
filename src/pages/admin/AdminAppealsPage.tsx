@@ -1,59 +1,77 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { AdminSidebar } from '../../components/admin/AdminSidebar';
 import { ModerationAppeal } from '../../types';
 import { useToast } from '../../components/Toast';
-
-const SEED_APPEALS: ModerationAppeal[] = [
-  {
-    id: 'app_1',
-    user_id: 'usr_sam',
-    action_type: 'Account Suspension (Spam flag)',
-    reason: 'My account was flagged accidentally while testing automated API triggers. I have resolved the loop.',
-    status: 'open',
-    created_at: new Date(Date.now() - 3600000 * 5).toISOString(),
-    user: {
-      id: 'usr_sam',
-      username: 'sam_systems',
-      display_name: 'Sam Miller',
-      bio: null,
-      avatar_url: null,
-      role: 'user',
-      status: 'suspended',
-      is_online: false,
-      last_seen: new Date().toISOString(),
-      created_at: '2026-02-14T14:30:00Z',
-    },
-  },
-  {
-    id: 'app_2',
-    user_id: 'usr_guest_4',
-    action_type: 'Message Deletion (Profanity Rule)',
-    reason: 'The quoted message was part of a humorous movie reference, not directed at any user.',
-    status: 'open',
-    created_at: new Date(Date.now() - 3600000 * 22).toISOString(),
-    user: {
-      id: 'usr_guest_4',
-      username: 'cinema_fan',
-      display_name: 'Alex D.',
-      bio: null,
-      avatar_url: null,
-      role: 'user',
-      status: 'active',
-      is_online: true,
-      last_seen: new Date().toISOString(),
-      created_at: '2026-03-01T12:00:00Z',
-    },
-  },
-];
+import { useAuth } from '../../hooks/useAuth';
+import { supabase, isConfigured } from '../../lib/supabaseClient';
 
 export const AdminAppealsPage: React.FC = () => {
   const { toast } = useToast();
-  const [appeals, setAppeals] = useState<ModerationAppeal[]>(SEED_APPEALS);
+  const { user: currentAdmin } = useAuth();
+  const [appeals, setAppeals] = useState<ModerationAppeal[]>([]);
+  const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'all' | 'open' | 'resolved'>('all');
   const [selectedAppeal, setSelectedAppeal] = useState<ModerationAppeal | null>(null);
   const [adminResponse, setAdminResponse] = useState('');
 
-  const handleResolve = (appealId: string, status: 'overturned' | 'upheld') => {
+  const loadAppeals = async () => {
+    setLoading(true);
+    if (isConfigured) {
+      try {
+        const { data, error } = await supabase
+          .from('moderation_appeals')
+          .select(`
+            id,
+            user_id,
+            action_type,
+            reason,
+            status,
+            reviewed_by,
+            created_at,
+            user:profiles!user_id(id, username, display_name, avatar_url, role, status)
+          `)
+          .order('created_at', { ascending: false });
+
+        if (!error && data) {
+          setAppeals(data as any[]);
+        }
+      } catch (err) {
+        console.warn('Load appeals error:', err);
+      } finally {
+        setLoading(false);
+      }
+    } else {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadAppeals();
+  }, []);
+
+  const handleResolve = async (appealId: string, status: 'overturned' | 'upheld') => {
+    if (isConfigured && currentAdmin) {
+      try {
+        await supabase
+          .from('moderation_appeals')
+          .update({
+            status,
+            reviewed_by: currentAdmin.id,
+          })
+          .eq('id', appealId);
+
+        // If overturned and appeal was for user suspension, unsuspend the user
+        if (status === 'overturned' && selectedAppeal?.user_id) {
+          await supabase
+            .from('profiles')
+            .update({ status: 'active' })
+            .eq('id', selectedAppeal.user_id);
+        }
+      } catch (err) {
+        console.warn('Failed to resolve appeal:', err);
+      }
+    }
+
     setAppeals((prev) =>
       prev.map((a) => (a.id === appealId ? { ...a, status, admin_response: adminResponse || undefined } : a))
     );
@@ -61,7 +79,7 @@ export const AdminAppealsPage: React.FC = () => {
     setAdminResponse('');
     toast(
       status === 'overturned'
-        ? 'Appeal overturned: User status restored.'
+        ? 'Appeal overturned: User account status restored.'
         : 'Appeal upheld: Decision affirmed.',
       status === 'overturned' ? 'success' : 'info'
     );
@@ -103,69 +121,117 @@ export const AdminAppealsPage: React.FC = () => {
           </div>
         </div>
 
-        <div className="space-y-3.5">
-          {filtered.length === 0 ? (
-            <div className="text-center py-16 text-gray-400 text-xs">
-              No appeals found in this category.
-            </div>
-          ) : (
-            filtered.map((appeal) => (
+        {loading ? (
+          <div className="flex items-center justify-center py-16">
+            <div className="w-8 h-8 border-3 border-[#0E2A6E] border-t-transparent rounded-full animate-spin" />
+          </div>
+        ) : filtered.length === 0 ? (
+          <div className="text-center py-16 text-gray-500 text-xs space-y-2">
+            <div className="text-3xl">⚖️</div>
+            <p className="font-bold text-black dark:text-white">No appeals in this view</p>
+            <p>User appeals submitted via the moderation appeals workflow will be listed here.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {filtered.map((appeal) => (
               <div
                 key={appeal.id}
-                className="p-5 rounded-3xl bg-white dark:bg-[#161B2B] border border-[#E5E7EB] dark:border-[#2A3348] shadow-xs space-y-3"
+                className="p-5 rounded-3xl bg-white dark:bg-[#161B2B] border border-[#E5E7EB] dark:border-[#2A3348] shadow-xs space-y-3 flex flex-col justify-between"
               >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-2.5">
-                    <span className="text-lg">⚖️</span>
-                    <div>
-                      <h4 className="font-extrabold text-xs text-black dark:text-white">
-                        {appeal.user?.display_name || 'User'} (@{appeal.user?.username})
-                      </h4>
-                      <p className="text-[10px] text-gray-500 font-semibold">{appeal.action_type}</p>
-                    </div>
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-blue-100 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300">
+                      {appeal.action_type}
+                    </span>
+                    <span
+                      className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-full ${
+                        appeal.status === 'open'
+                          ? 'bg-amber-100 dark:bg-amber-950/60 text-amber-700 dark:text-amber-300'
+                          : appeal.status === 'overturned'
+                          ? 'bg-emerald-100 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-300'
+                          : 'bg-gray-100 dark:bg-gray-800 text-gray-500'
+                      }`}
+                    >
+                      {appeal.status}
+                    </span>
                   </div>
 
-                  <span
-                    className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${
-                      appeal.status === 'open'
-                        ? 'bg-amber-500/20 text-amber-600 dark:text-amber-400'
-                        : appeal.status === 'overturned'
-                        ? 'bg-emerald-500/20 text-emerald-600 dark:text-emerald-400'
-                        : 'bg-gray-200 dark:bg-gray-700 text-gray-600 dark:text-gray-300'
-                    }`}
-                  >
-                    {appeal.status}
+                  <div>
+                    <h3 className="font-extrabold text-sm text-black dark:text-white">
+                      User: {appeal.user?.display_name || 'User'} (@{appeal.user?.username || 'user'})
+                    </h3>
+                    <p className="text-xs text-gray-600 dark:text-gray-300 mt-1 italic">
+                      "{appeal.reason}"
+                    </p>
+                  </div>
+                </div>
+
+                <div className="pt-3 border-t border-gray-100 dark:border-gray-800 flex items-center justify-between text-xs">
+                  <span className="text-[10px] text-gray-400">
+                    {new Date(appeal.created_at).toLocaleDateString()}
                   </span>
-                </div>
-
-                <div className="p-3.5 rounded-2xl bg-gray-50 dark:bg-gray-900/40 border border-gray-100 dark:border-gray-800 text-xs text-gray-700 dark:text-gray-300 italic">
-                  "{appeal.reason}"
-                </div>
-
-                {appeal.status === 'open' ? (
-                  <div className="flex items-center justify-end space-x-2 pt-1">
+                  {appeal.status === 'open' && (
                     <button
-                      onClick={() => handleResolve(appeal.id, 'overturned')}
-                      className="px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold active:scale-95 transition-transform"
+                      onClick={() => setSelectedAppeal(appeal)}
+                      className="px-3 py-1 rounded-xl bg-[#0E2A6E] text-white font-bold hover:bg-[#081B47]"
                     >
-                      Overturn Decision
+                      Review Appeal
                     </button>
-                    <button
-                      onClick={() => handleResolve(appeal.id, 'upheld')}
-                      className="px-4 py-1.5 rounded-xl border border-rose-300 dark:border-rose-800 text-rose-600 dark:text-rose-400 text-xs font-bold hover:bg-rose-50"
-                    >
-                      Uphold Penalty
-                    </button>
-                  </div>
-                ) : (
-                  <p className="text-[11px] text-gray-400 font-medium">
-                    Reviewed & closed • Outcome: {appeal.status.toUpperCase()}
-                  </p>
-                )}
+                  )}
+                </div>
               </div>
-            ))
-          )}
-        </div>
+            ))}
+          </div>
+        )}
+
+        {/* Modal */}
+        {selectedAppeal && (
+          <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-[#161B2B] rounded-3xl max-w-md w-full p-6 border border-[#E5E7EB] dark:border-[#2A3348] shadow-2xl space-y-4">
+              <h3 className="font-black text-base text-black dark:text-white">
+                Resolve Appeal: @{selectedAppeal.user?.username}
+              </h3>
+              <div className="p-3 bg-gray-50 dark:bg-gray-800/50 rounded-2xl text-xs space-y-1">
+                <span className="font-bold block text-gray-400">User Reason:</span>
+                <p className="italic">{selectedAppeal.reason}</p>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-gray-700 dark:text-gray-300 block mb-1">
+                  Optional Admin Note:
+                </label>
+                <textarea
+                  value={adminResponse}
+                  onChange={(e) => setAdminResponse(e.target.value)}
+                  placeholder="Explanation of decision..."
+                  rows={3}
+                  className="w-full px-3.5 py-2 rounded-xl bg-[#F5F7FA] dark:bg-[#1A2234] border border-[#E5E7EB] dark:border-[#2A3348] text-xs font-semibold focus:outline-hidden"
+                />
+              </div>
+
+              <div className="flex space-x-2 pt-2">
+                <button
+                  onClick={() => setSelectedAppeal(null)}
+                  className="flex-1 py-2 rounded-xl bg-gray-100 dark:bg-gray-800 text-xs font-bold"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => handleResolve(selectedAppeal.id, 'upheld')}
+                  className="flex-1 py-2 rounded-xl bg-red-600 text-white text-xs font-bold hover:bg-red-700"
+                >
+                  Uphold Action
+                </button>
+                <button
+                  onClick={() => handleResolve(selectedAppeal.id, 'overturned')}
+                  className="flex-1 py-2 rounded-xl bg-emerald-600 text-white text-xs font-bold hover:bg-emerald-700"
+                >
+                  Overturn & Restore
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </AdminSidebar>
   );

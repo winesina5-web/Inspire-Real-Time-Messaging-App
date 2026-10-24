@@ -5,32 +5,12 @@ import { useToast } from '../../components/Toast';
 import { Broadcast } from '../../types';
 import { supabase, isConfigured } from '../../lib/supabaseClient';
 
-const SEED_BROADCASTS: Broadcast[] = [
-  {
-    id: 'bc_1',
-    title: 'Welcome to Inspire Messenger v1.0',
-    body: 'We are thrilled to launch the real-time messaging experience with audio notes and instant delivery.',
-    audience: 'all',
-    dismissible: true,
-    sent_by: '99999999-9999-4999-8999-999999999999',
-    created_at: new Date(Date.now() - 3600000 * 48).toISOString(),
-  },
-  {
-    id: 'bc_2',
-    title: 'Scheduled Cloudflare Performance Maintenance',
-    body: 'Brief 2-minute connection refresh at 02:00 UTC. Your chats remain safely persisted.',
-    audience: 'all',
-    dismissible: false,
-    sent_by: '99999999-9999-4999-8999-999999999999',
-    created_at: new Date(Date.now() - 3600000 * 12).toISOString(),
-  },
-];
-
 export const AdminBroadcastPage: React.FC = () => {
   const { user } = useAuth();
   const { toast } = useToast();
 
-  const [broadcasts, setBroadcasts] = useState<Broadcast[]>(SEED_BROADCASTS);
+  const [broadcasts, setBroadcasts] = useState<Broadcast[]>([]);
+  const [loading, setLoading] = useState(true);
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [audience, setAudience] = useState<'all' | 'active_7d'>('all');
@@ -38,18 +18,23 @@ export const AdminBroadcastPage: React.FC = () => {
   const [isSending, setIsSending] = useState(false);
 
   useEffect(() => {
-    if (!isConfigured) return;
-
     const fetchBroadcasts = async () => {
-      try {
-        const { data } = await supabase
-          .from('broadcasts')
-          .select('*')
-          .order('created_at', { ascending: false });
+      setLoading(true);
+      if (isConfigured) {
+        try {
+          const { data } = await supabase
+            .from('broadcasts')
+            .select('*')
+            .order('created_at', { ascending: false });
 
-        if (data) setBroadcasts(data as Broadcast[]);
-      } catch (err) {
-        console.warn('Fetch broadcasts error:', err);
+          if (data) setBroadcasts(data as Broadcast[]);
+        } catch (err) {
+          console.warn('Fetch broadcasts error:', err);
+        } finally {
+          setLoading(false);
+        }
+      } else {
+        setLoading(false);
       }
     };
 
@@ -61,30 +46,44 @@ export const AdminBroadcastPage: React.FC = () => {
     if (!title.trim() || !body.trim() || !user) return;
 
     setIsSending(true);
-    const newBroadcast: Broadcast = {
-      id: `bc_${Date.now()}`,
-      title: title.trim(),
-      body: body.trim(),
-      audience,
-      dismissible,
-      sent_by: user.id,
-      created_at: new Date().toISOString(),
-    };
-
-    setBroadcasts((prev) => [newBroadcast, ...prev]);
 
     if (isConfigured) {
       try {
-        await supabase.from('broadcasts').insert({
-          title: title.trim(),
-          body: body.trim(),
-          audience,
-          dismissible,
-          sent_by: user.id,
-        });
-      } catch (err: unknown) {
+        const { data, error } = await supabase
+          .from('broadcasts')
+          .insert({
+            title: title.trim(),
+            body: body.trim(),
+            audience,
+            dismissible,
+            sent_by: user.id,
+          })
+          .select()
+          .single();
+
+        if (error) {
+          toast(error.message, 'error');
+          setIsSending(false);
+          return;
+        }
+
+        if (data) {
+          setBroadcasts((prev) => [data as Broadcast, ...prev]);
+        }
+      } catch (err: any) {
         console.warn('Broadcast send error:', err);
       }
+    } else {
+      const newBroadcast: Broadcast = {
+        id: `bc_${Date.now()}`,
+        title: title.trim(),
+        body: body.trim(),
+        audience,
+        dismissible,
+        sent_by: user.id,
+        created_at: new Date().toISOString(),
+      };
+      setBroadcasts((prev) => [newBroadcast, ...prev]);
     }
 
     setIsSending(false);
@@ -98,128 +97,121 @@ export const AdminBroadcastPage: React.FC = () => {
       <div className="space-y-6 animate-fade-in">
         <div>
           <h1 className="text-2xl font-black text-black dark:text-white tracking-tight">
-            Broadcast Announcements
+            System Broadcasts
           </h1>
           <p className="text-xs font-semibold text-[#4B5563] dark:text-[#9CA3AF] mt-0.5">
-            Send real-time alerts or banner notices to all active Inspire users
+            Deliver official platform announcements to all active users
           </p>
         </div>
 
-        {/* Compose Form */}
-        <form
-          onSubmit={handleSendBroadcast}
-          className="bg-white dark:bg-[#161B2B] p-6 rounded-3xl border border-[#E5E7EB] dark:border-[#2A3348] shadow-sm space-y-4"
-        >
-          <h3 className="font-extrabold text-sm text-black dark:text-white">
-            Compose New Broadcast
-          </h3>
+        {/* Compose Form Card */}
+        <div className="bg-white dark:bg-[#161B2B] p-6 rounded-3xl border border-[#E5E7EB] dark:border-[#2A3348] shadow-sm space-y-4">
+          <h2 className="text-sm font-black text-black dark:text-white">
+            Compose Announcement
+          </h2>
 
-          <div>
-            <label className="block text-xs font-bold uppercase text-black dark:text-gray-200 mb-1">
-              Title
-            </label>
-            <input
-              type="text"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="e.g. Platform Update: Voice Notes Now Available"
-              required
-              className="w-full px-4 py-2.5 rounded-2xl bg-[#F5F7FA] dark:bg-[#1A2234] border border-[#E5E7EB] dark:border-[#2A3348] text-xs font-medium text-black dark:text-white focus:outline-none focus:border-[#0E2A6E]"
-            />
-          </div>
-
-          <div>
-            <label className="block text-xs font-bold uppercase text-black dark:text-gray-200 mb-1">
-              Message Body
-            </label>
-            <textarea
-              value={body}
-              onChange={(e) => setBody(e.target.value)}
-              placeholder="Enter details of announcement…"
-              rows={3}
-              required
-              className="w-full px-4 py-2.5 rounded-2xl bg-[#F5F7FA] dark:bg-[#1A2234] border border-[#E5E7EB] dark:border-[#2A3348] text-xs font-medium text-black dark:text-white focus:outline-none focus:border-[#0E2A6E]"
-            />
-          </div>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <form onSubmit={handleSendBroadcast} className="space-y-4">
             <div>
-              <label className="block text-xs font-bold uppercase text-black dark:text-gray-200 mb-1">
-                Audience Filter
+              <label className="text-xs font-bold text-[#4B5563] dark:text-[#9CA3AF] block mb-1">
+                Headline / Title
               </label>
-              <select
-                value={audience}
-                onChange={(e) => setAudience(e.target.value as 'all' | 'active_7d')}
-                className="w-full px-3 py-2 rounded-xl bg-[#F5F7FA] dark:bg-[#1A2234] border border-[#E5E7EB] dark:border-[#2A3348] text-xs font-medium text-black dark:text-white"
-              >
-                <option value="all">All Registered Users</option>
-                <option value="active_7d">Users Active in Last 7 Days</option>
-              </select>
+              <input
+                type="text"
+                required
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+                placeholder="e.g., Scheduled Platform Maintenance Notice"
+                className="w-full px-4 py-2.5 rounded-2xl bg-[#F5F7FA] dark:bg-[#1A2234] border border-[#E5E7EB] dark:border-[#2A3348] text-xs font-semibold focus:outline-hidden focus:border-[#0E2A6E]"
+              />
             </div>
 
             <div>
-              <label className="block text-xs font-bold uppercase text-black dark:text-gray-200 mb-1">
-                Dismissibility
+              <label className="text-xs font-bold text-[#4B5563] dark:text-[#9CA3AF] block mb-1">
+                Announcement Message
               </label>
-              <div className="flex items-center space-x-3 mt-2">
-                <label className="flex items-center space-x-2 text-xs font-semibold cursor-pointer">
-                  <input
-                    type="radio"
-                    checked={dismissible}
-                    onChange={() => setDismissible(true)}
-                  />
-                  <span>Dismissible by user</span>
+              <textarea
+                required
+                rows={3}
+                value={body}
+                onChange={(e) => setBody(e.target.value)}
+                placeholder="Write the full message details..."
+                className="w-full px-4 py-2.5 rounded-2xl bg-[#F5F7FA] dark:bg-[#1A2234] border border-[#E5E7EB] dark:border-[#2A3348] text-xs font-semibold focus:outline-hidden focus:border-[#0E2A6E]"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="text-xs font-bold text-[#4B5563] dark:text-[#9CA3AF] block mb-1">
+                  Target Audience
                 </label>
-                <label className="flex items-center space-x-2 text-xs font-semibold cursor-pointer">
-                  <input
-                    type="radio"
-                    checked={!dismissible}
-                    onChange={() => setDismissible(false)}
-                  />
-                  <span>Persistent banner</span>
+                <select
+                  value={audience}
+                  onChange={(e) => setAudience(e.target.value as any)}
+                  className="w-full px-3.5 py-2.5 rounded-2xl bg-[#F5F7FA] dark:bg-[#1A2234] border border-[#E5E7EB] dark:border-[#2A3348] text-xs font-semibold"
+                >
+                  <option value="all">All Registered Users</option>
+                  <option value="active_7d">Users Active in Last 7 Days</option>
+                </select>
+              </div>
+
+              <div className="flex items-center space-x-2 pt-6">
+                <input
+                  type="checkbox"
+                  id="dismissible"
+                  checked={dismissible}
+                  onChange={(e) => setDismissible(e.target.checked)}
+                  className="w-4 h-4 accent-[#0E2A6E]"
+                />
+                <label htmlFor="dismissible" className="text-xs font-bold text-[#4B5563] dark:text-[#9CA3AF]">
+                  Allow users to dismiss banner
                 </label>
               </div>
             </div>
-          </div>
 
-          <button
-            type="submit"
-            disabled={isSending}
-            className="py-3 px-5 rounded-2xl bg-[#0E2A6E] text-white font-extrabold text-xs hover:bg-[#081B47] active:scale-95 transition-all shadow-md disabled:opacity-50"
-          >
-            {isSending ? 'Broadcasting…' : 'Publish Broadcast'}
-          </button>
-        </form>
-
-        {/* Broadcast History */}
-        <div className="bg-white dark:bg-[#161B2B] p-6 rounded-3xl border border-[#E5E7EB] dark:border-[#2A3348] shadow-sm">
-          <h3 className="font-extrabold text-sm text-black dark:text-white mb-4">
-            Past Announcements
-          </h3>
-          <div className="space-y-3">
-            {broadcasts.map((b) => (
-              <div
-                key={b.id}
-                className="p-4 rounded-2xl border border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/30 space-y-1"
+            <div className="flex justify-end pt-2">
+              <button
+                type="submit"
+                disabled={isSending || !title.trim() || !body.trim()}
+                className="px-6 py-2.5 rounded-full bg-[#0E2A6E] text-white text-xs font-bold shadow-md hover:bg-[#081B47] active:scale-95 disabled:opacity-50"
               >
-                <div className="flex items-center justify-between">
-                  <h4 className="font-bold text-xs text-black dark:text-white">{b.title}</h4>
-                  <span className="text-[10px] text-gray-400">
-                    {new Date(b.created_at).toLocaleDateString()}
-                  </span>
+                {isSending ? 'Sending Announcement…' : 'Send Broadcast Now 📢'}
+              </button>
+            </div>
+          </form>
+        </div>
+
+        {/* History of Past Broadcasts */}
+        <div className="bg-white dark:bg-[#161B2B] p-6 rounded-3xl border border-[#E5E7EB] dark:border-[#2A3348] shadow-sm space-y-4">
+          <h2 className="text-sm font-black text-black dark:text-white">
+            Broadcast History
+          </h2>
+
+          {loading ? (
+            <div className="flex items-center justify-center py-10">
+              <div className="w-8 h-8 border-3 border-[#0E2A6E] border-t-transparent rounded-full animate-spin" />
+            </div>
+          ) : broadcasts.length === 0 ? (
+            <p className="text-xs text-gray-500 py-6 text-center">No broadcasts published yet.</p>
+          ) : (
+            <div className="divide-y divide-[#E5E7EB] dark:divide-[#2A3348]">
+              {broadcasts.map((bc) => (
+                <div key={bc.id} className="py-4 space-y-1">
+                  <div className="flex items-center justify-between">
+                    <h3 className="font-bold text-sm text-black dark:text-white">{bc.title}</h3>
+                    <span className="text-[10px] text-gray-400">
+                      {new Date(bc.created_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}
+                    </span>
+                  </div>
+                  <p className="text-xs text-gray-600 dark:text-gray-300">{bc.body}</p>
+                  <div className="flex items-center space-x-3 text-[10px] text-gray-400 pt-1 font-semibold">
+                    <span>Audience: {bc.audience === 'all' ? 'All Users' : 'Active (7d)'}</span>
+                    <span>•</span>
+                    <span>{bc.dismissible ? 'Dismissible Banner' : 'Permanent Sticky'}</span>
+                  </div>
                 </div>
-                <p className="text-xs text-[#4B5563] dark:text-[#9CA3AF] leading-relaxed">
-                  {b.body}
-                </p>
-                <div className="flex items-center space-x-2 pt-1 text-[10px] font-semibold text-gray-500">
-                  <span className="px-2 py-0.5 rounded-md bg-gray-200 dark:bg-gray-700">
-                    Audience: {b.audience}
-                  </span>
-                  <span>{b.dismissible ? 'Dismissible' : 'Persistent'}</span>
-                </div>
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </AdminSidebar>

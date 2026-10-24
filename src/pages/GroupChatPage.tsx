@@ -11,73 +11,15 @@ import { PaymentSplitModal } from '../components/PaymentSplitModal';
 import { Group, Message, Profile, PollData, GroupEvent, PaymentSplit } from '../types';
 import { supabase, isConfigured } from '../lib/supabaseClient';
 
-const SEED_GROUP: Group = {
-  id: 'grp_eng_core',
-  name: 'Inspire Core Engineering 🚀',
-  description: 'Architecture, real-time messaging sync, and Cloudflare R2 media pipelines',
-  avatar_url: null,
-  created_by: '11111111-1111-4111-8111-111111111111',
-  created_at: '2026-02-01T10:00:00Z',
-  members_count: 5,
-  role: 'admin',
-  slow_mode_interval: 5,
-};
-
-const SEED_GROUP_MESSAGES: Message[] = [
-  {
-    id: 'grp_msg_1',
-    sender_id: 'usr_jordan',
-    group_id: 'grp_eng_core',
-    content: 'Welcome everyone to the Inspire Core Engineering group! Testing group broadcast channel.',
-    message_type: 'text',
-    media_url: null,
-    media_size: null,
-    media_name: null,
-    reply_to_id: null,
-    is_deleted_sender: false,
-    is_deleted_receiver: false,
-    is_read: true,
-    read_at: null,
-    created_at: new Date(Date.now() - 3600000 * 2).toISOString(),
-    thread_reply_count: 2,
-    reactions: [{ id: 'rx_g1', message_id: 'grp_msg_1', user_id: '11111111-1111-4111-8111-111111111111', emoji: '🙌', created_at: new Date().toISOString() }],
-  },
-  {
-    id: 'grp_msg_2',
-    sender_id: 'usr_maya',
-    group_id: 'grp_eng_core',
-    content: 'Should we prioritize interactive polls and custom bubble tints for this release?',
-    message_type: 'poll',
-    media_url: null,
-    media_size: null,
-    media_name: null,
-    reply_to_id: null,
-    is_deleted_sender: false,
-    is_deleted_receiver: false,
-    is_read: true,
-    read_at: null,
-    created_at: new Date(Date.now() - 3600000 * 1).toISOString(),
-    poll_data: {
-      id: 'poll_101',
-      question: 'Which advanced feature is your top favorite?',
-      allow_multiple: false,
-      options: [
-        { id: 'opt_1', option_text: 'Polls & Group Collaboration', votes: ['usr_jordan', '11111111-1111-4111-8111-111111111111'] },
-        { id: 'opt_2', option_text: 'Voice/Video Calling & Screen Share', votes: ['usr_maya'] },
-        { id: 'opt_3', option_text: 'Secret Chats & View-Once Media', votes: [] },
-      ],
-    },
-  },
-];
-
 export const GroupChatPage: React.FC = () => {
   const { groupId } = useParams<{ groupId: string }>();
   const navigate = useNavigate();
   const { user } = useAuth();
   const { toast } = useToast();
 
-  const [group, setGroup] = useState<Group>(SEED_GROUP);
-  const [messages, setMessages] = useState<Message[]>(SEED_GROUP_MESSAGES);
+  const [group, setGroup] = useState<Group | null>(null);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [loading, setLoading] = useState(true);
   const [inputText, setInputText] = useState('');
   const [showPollModal, setShowPollModal] = useState(false);
   const [showInfoModal, setShowInfoModal] = useState(false);
@@ -85,8 +27,8 @@ export const GroupChatPage: React.FC = () => {
   const [showSplitModal, setShowPaymentSplitModal] = useState(false);
   const [activeThreadMessage, setActiveThreadMessage] = useState<Message | null>(null);
 
-  // Feature 113: Group Slow Mode
-  const [slowModeSeconds, setSlowModeSeconds] = useState(group.slow_mode_interval || 0);
+  // Group Slow Mode (Feature 113)
+  const [slowModeSeconds, setSlowModeSeconds] = useState(0);
   const [cooldownRemaining, setCooldownRemaining] = useState(0);
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
@@ -103,19 +45,191 @@ export const GroupChatPage: React.FC = () => {
     return () => clearInterval(timer);
   }, [cooldownRemaining]);
 
-  const handleSendMessage = (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (!inputText.trim() || !user) return;
-    if (cooldownRemaining > 0) {
-      toast(`Slow mode active: wait ${cooldownRemaining}s before sending.`, 'info');
-      return;
+  // Load group info, membership role, and messages
+  useEffect(() => {
+    if (!groupId || !user) return;
+    setLoading(true);
+
+    const loadGroupData = async () => {
+      if (isConfigured) {
+        try {
+          // Fetch group metadata
+          const { data: grpData, error: grpErr } = await supabase
+            .from('groups')
+            .select('*')
+            .eq('id', groupId)
+            .single();
+
+          if (grpErr || !grpData) {
+            toast('Group not found', 'error');
+            navigate('/chats');
+            return;
+          }
+
+          // Check user membership role
+          const { data: memberData } = await supabase
+            .from('group_members')
+            .select('role')
+            .eq('group_id', groupId)
+            .eq('user_id', user.id)
+            .maybeSingle();
+
+          // Check slow mode settings
+          const { data: slowData } = await supabase
+            .from('slow_mode_settings')
+            .select('interval_seconds')
+            .eq('group_id', groupId)
+            .maybeSingle();
+
+          const interval = slowData?.interval_seconds || 0;
+          setSlowModeSeconds(interval);
+
+          setGroup({
+            id: grpData.id,
+            name: grpData.name,
+            description: grpData.description,
+            avatar_url: grpData.avatar_url,
+            created_by: grpData.created_by,
+            created_at: grpData.created_at,
+            members_count: grpData.max_members || 1,
+            role: memberData?.role || 'member',
+            slow_mode_interval: interval,
+          });
+
+          // Fetch group messages
+          const { data: msgRows, error: msgErr } = await supabase
+            .from('group_messages')
+            .select(`
+              id,
+              sender_id,
+              group_id,
+              content,
+              message_type,
+              media_url,
+              media_size,
+              media_name,
+              reply_to_id,
+              is_deleted,
+              created_at,
+              edited_at,
+              thread_reply_count
+            `)
+            .eq('group_id', groupId)
+            .order('created_at', { ascending: true });
+
+          if (!msgErr && msgRows) {
+            setMessages(
+              msgRows.map((m: any) => ({
+                id: m.id,
+                sender_id: m.sender_id,
+                group_id: m.group_id,
+                content: m.content,
+                message_type: m.message_type,
+                media_url: m.media_url,
+                media_size: m.media_size,
+                media_name: m.media_name,
+                reply_to_id: m.reply_to_id,
+                is_deleted_sender: m.is_deleted,
+                is_deleted_receiver: m.is_deleted,
+                is_read: true,
+                read_at: null,
+                created_at: m.created_at,
+                edited_at: m.edited_at,
+                thread_reply_count: m.thread_reply_count || 0,
+                reactions: [],
+              }))
+            );
+          }
+        } catch (err) {
+          console.warn('Group load error:', err);
+        } finally {
+          setLoading(false);
+        }
+      } else {
+        // Fallback placeholder group for dev testing
+        setGroup({
+          id: groupId,
+          name: 'Project Team Chat 🚀',
+          description: 'Inspire engineering discussions',
+          avatar_url: null,
+          created_by: user.id,
+          created_at: new Date().toISOString(),
+          members_count: 3,
+          role: 'admin',
+          slow_mode_interval: 0,
+        });
+        setLoading(false);
+      }
+    };
+
+    loadGroupData();
+
+    // Supabase Realtime subscription on group_messages
+    let subscription: any = null;
+    if (isConfigured) {
+      const channel = supabase
+        .channel(`group_chat_${groupId}`)
+        .on(
+          'postgres_changes',
+          { event: 'INSERT', schema: 'public', table: 'group_messages', filter: `group_id=eq.${groupId}` },
+          (payload) => {
+            const newM = payload.new as any;
+            setMessages((prev) => {
+              if (prev.some((m) => m.id === newM.id)) return prev;
+              return [
+                ...prev,
+                {
+                  id: newM.id,
+                  sender_id: newM.sender_id,
+                  group_id: newM.group_id,
+                  content: newM.content,
+                  message_type: newM.message_type,
+                  media_url: newM.media_url,
+                  media_size: newM.media_size,
+                  media_name: newM.media_name,
+                  reply_to_id: newM.reply_to_id,
+                  is_deleted_sender: newM.is_deleted,
+                  is_deleted_receiver: newM.is_deleted,
+                  is_read: true,
+                  read_at: null,
+                  created_at: newM.created_at,
+                  edited_at: newM.edited_at,
+                  thread_reply_count: newM.thread_reply_count || 0,
+                  reactions: [],
+                },
+              ];
+            });
+          }
+        )
+        .subscribe();
+
+      subscription = channel;
     }
 
+    return () => {
+      if (subscription) {
+        supabase.removeChannel(subscription);
+      }
+    };
+  }, [groupId, user]);
+
+  const handleSendMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!inputText.trim() || cooldownRemaining > 0 || !user || !groupId) return;
+
+    const content = inputText.trim();
+    setInputText('');
+
+    if (slowModeSeconds > 0) {
+      setCooldownRemaining(slowModeSeconds);
+    }
+
+    const tempId = `grp_msg_${Date.now()}`;
     const newMsg: Message = {
-      id: `grp_msg_${Date.now()}`,
+      id: tempId,
       sender_id: user.id,
-      group_id: groupId || 'grp_eng_core',
-      content: inputText.trim(),
+      group_id: groupId,
+      content,
       message_type: 'text',
       media_url: null,
       media_size: null,
@@ -126,59 +240,49 @@ export const GroupChatPage: React.FC = () => {
       is_read: true,
       read_at: null,
       created_at: new Date().toISOString(),
+      thread_reply_count: 0,
       reactions: [],
     };
 
+    // Optimistic UI update
     setMessages((prev) => [...prev, newMsg]);
-    setInputText('');
-    if (slowModeSeconds > 0) {
-      setCooldownRemaining(slowModeSeconds);
+
+    if (isConfigured) {
+      try {
+        const { data, error } = await supabase
+          .from('group_messages')
+          .insert({
+            group_id: groupId,
+            sender_id: user.id,
+            content,
+            message_type: 'text',
+          })
+          .select()
+          .single();
+
+        if (error) {
+          toast(error.message, 'error');
+          // Revert optimistic message
+          setMessages((prev) => prev.filter((m) => m.id !== tempId));
+        } else if (data) {
+          setMessages((prev) =>
+            prev.map((m) => (m.id === tempId ? { ...m, id: data.id } : m))
+          );
+        }
+      } catch (err) {
+        console.warn('Group send error:', err);
+      }
     }
   };
 
-  const handleVotePoll = (messageId: string, optionId: string) => {
-    if (!user) return;
+  const handleCreatePoll = async (data: { question: string; options: string[]; allowMultiple: boolean }) => {
+    if (!groupId || !user) return;
 
-    setMessages((prev) =>
-      prev.map((msg) => {
-        if (msg.id !== messageId || !msg.poll_data) return msg;
-
-        const updatedOptions = msg.poll_data.options.map((opt) => {
-          const hasVoted = opt.votes.includes(user.id);
-          if (opt.id === optionId) {
-            return {
-              ...opt,
-              votes: hasVoted ? opt.votes.filter((id) => id !== user.id) : [...opt.votes, user.id],
-            };
-          } else if (!msg.poll_data?.allow_multiple) {
-            return {
-              ...opt,
-              votes: opt.votes.filter((id) => id !== user.id),
-            };
-          }
-          return opt;
-        });
-
-        return {
-          ...msg,
-          poll_data: {
-            ...msg.poll_data,
-            options: updatedOptions,
-          },
-        };
-      })
-    );
-
-    toast('Poll vote registered in group!', 'info');
-  };
-
-  const handleSendPoll = (poll: PollData) => {
-    if (!user) return;
     const pollMsg: Message = {
-      id: `grp_poll_${Date.now()}`,
+      id: `poll_msg_${Date.now()}`,
       sender_id: user.id,
-      group_id: groupId || 'grp_eng_core',
-      content: null,
+      group_id: groupId,
+      content: data.question,
       message_type: 'poll',
       media_url: null,
       media_size: null,
@@ -189,293 +293,226 @@ export const GroupChatPage: React.FC = () => {
       is_read: true,
       read_at: null,
       created_at: new Date().toISOString(),
-      poll_data: poll,
+      poll_data: {
+        id: `poll_${Date.now()}`,
+        question: data.question,
+        allow_multiple: data.allowMultiple,
+        options: data.options.map((opt, idx) => ({ id: `opt_${idx}`, option_text: opt, votes: [] })),
+      },
       reactions: [],
     };
+
     setMessages((prev) => [...prev, pollMsg]);
-    toast('Poll published to group!', 'success');
+    setShowPollModal(false);
+    toast('Poll created in group chat', 'success');
   };
 
-  const handleSendEvent = (event: GroupEvent) => {
-    if (!user) return;
-    const eventMsg: Message = {
-      id: `grp_evt_${Date.now()}`,
-      sender_id: user.id,
-      group_id: groupId || 'grp_eng_core',
-      content: null,
-      message_type: 'event',
-      event_data: event,
-      media_url: null,
-      media_size: null,
-      media_name: null,
-      reply_to_id: null,
-      is_deleted_sender: false,
-      is_deleted_receiver: false,
-      is_read: true,
-      read_at: null,
-      created_at: new Date().toISOString(),
-      reactions: [],
-    };
-    setMessages((prev) => [...prev, eventMsg]);
-    setShowGroupEventModal(false);
-    toast('Group event published!', 'success');
-  };
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-white dark:bg-[#0B0F1A]">
+        <div className="w-10 h-10 border-4 border-[#0E2A6E] border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
 
-  const handleSendSplit = (split: PaymentSplit) => {
-    if (!user) return;
-    const splitMsg: Message = {
-      id: `grp_spl_${Date.now()}`,
-      sender_id: user.id,
-      group_id: groupId || 'grp_eng_core',
-      content: null,
-      message_type: 'split',
-      split_data: split,
-      media_url: null,
-      media_size: null,
-      media_name: null,
-      reply_to_id: null,
-      is_deleted_sender: false,
-      is_deleted_receiver: false,
-      is_read: true,
-      read_at: null,
-      created_at: new Date().toISOString(),
-      reactions: [],
-    };
-    setMessages((prev) => [...prev, splitMsg]);
-    setShowPaymentSplitModal(false);
-    toast('Group expense split card sent!', 'success');
-  };
+  if (!group) return null;
 
   return (
-    <div className="flex flex-col h-screen h-[100dvh] bg-white dark:bg-[#0B0F1A] text-black dark:text-white overflow-hidden">
-      {/* Group Header */}
-      <header className="flex-shrink-0 z-30 bg-white dark:bg-[#0B0F1A] border-b border-[#E5E7EB] dark:border-[#2A3348] px-3 py-2.5 flex items-center justify-between shadow-xs">
-        <div className="flex items-center space-x-2.5 min-w-0">
-          <button onClick={() => navigate('/chats')} className="p-1.5 -ml-1 text-black dark:text-white font-bold" aria-label="Back">
+    <div className="min-h-screen bg-white dark:bg-[#0B0F1A] text-black dark:text-white flex flex-col">
+      {/* Header */}
+      <header className="sticky top-0 z-30 bg-white/95 dark:bg-[#0B0F1A]/95 backdrop-blur-md border-b border-[#E5E7EB] dark:border-[#2A3348] px-4 py-3 flex items-center justify-between">
+        <div className="flex items-center space-x-3">
+          <button
+            onClick={() => navigate('/chats')}
+            className="w-8 h-8 rounded-full flex items-center justify-center text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800"
+          >
             ←
           </button>
-          <div
-            onClick={() => setShowInfoModal(true)}
-            className="flex items-center space-x-2.5 cursor-pointer min-w-0"
-          >
-            <Avatar name={group.name} size="sm" />
-            <div className="min-w-0">
-              <div className="flex items-center space-x-1">
-                <h2 className="font-extrabold text-sm text-black dark:text-white truncate">
+          <div className="flex items-center space-x-2.5 cursor-pointer" onClick={() => setShowInfoModal(true)}>
+            <Avatar name={group.name} avatarUrl={group.avatar_url} size="md" />
+            <div>
+              <div className="flex items-center space-x-1.5">
+                <h1 className="font-extrabold text-sm text-black dark:text-white leading-tight truncate max-w-[180px]">
                   {group.name}
-                </h2>
+                </h1>
                 {slowModeSeconds > 0 && (
-                  <span className="text-[10px] px-1.5 py-0.2 rounded-full bg-amber-500/20 text-amber-600 dark:text-amber-400 font-bold" title={`Slow mode: ${slowModeSeconds}s`}>
+                  <span className="px-1.5 py-0.5 rounded-full bg-[#FFD700] text-[#1A1A2E] text-[9px] font-black" title={`Slow mode active: ${slowModeSeconds}s`}>
                     ⏱ {slowModeSeconds}s
                   </span>
                 )}
               </div>
-              <p className="text-[11px] text-[#4B5563] dark:text-[#9CA3AF] truncate">
-                {group.members_count || 5} members • Tap for info
-              </p>
+              <p className="text-[10px] text-gray-500 font-semibold">{group.members_count} members • Group Chat</p>
             </div>
           </div>
         </div>
 
-        <button
-          onClick={() => setShowInfoModal(true)}
-          className="p-2 text-sm font-bold text-gray-500 hover:text-black dark:hover:text-white"
-          title="Group info & settings"
-        >
-          ℹ️
-        </button>
-      </header>
-
-      {/* Messages Canvas */}
-      <main className="flex-1 overflow-y-auto px-4 py-3 space-y-1 bg-white dark:bg-[#0B0F1A]">
-        {messages.map((msg) => (
-          <MessageBubble
-            key={msg.id}
-            message={msg}
-            currentUserId={user?.id || ''}
-            onReply={() => {}}
-            onDelete={(id) => setMessages((prev) => prev.filter((m) => m.id !== id))}
-            onReact={(id, emoji) => {
-              setMessages((prev) =>
-                prev.map((m) =>
-                  m.id === id
-                    ? {
-                        ...m,
-                        reactions: [
-                          ...(m.reactions || []).filter((r) => r.user_id !== user?.id),
-                          { id: `rx_${Date.now()}`, message_id: id, user_id: user?.id || 'me', emoji, created_at: new Date().toISOString() },
-                        ],
-                      }
-                    : m
-                )
-              );
-            }}
-            onVotePoll={handleVotePoll}
-            onOpenThread={(m) => setActiveThreadMessage(m)}
-          />
-        ))}
-        <div ref={messagesEndRef} />
-      </main>
-
-      {/* Bottom Composer */}
-      <footer className="p-3 bg-white dark:bg-[#0B0F1A] border-t border-[#E5E7EB] dark:border-[#2A3348]">
-        {cooldownRemaining > 0 && (
-          <div className="text-[10px] text-amber-500 font-bold mb-1.5 text-center">
-            ⏱ Slow mode: You can send a message in {cooldownRemaining}s
-          </div>
-        )}
-        <form onSubmit={handleSendMessage} className="flex items-center space-x-2">
+        {/* Action icons */}
+        <div className="flex items-center space-x-1">
           <button
-            type="button"
-            onClick={() => setShowPollModal(true)}
-            className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 text-lg"
-            title="Create Poll"
-          >
-            📊
-          </button>
-          <button
-            type="button"
             onClick={() => setShowGroupEventModal(true)}
-            className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 text-lg"
-            title="Create Group Event"
+            className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 text-sm"
+            title="Schedule Event"
           >
             📅
           </button>
           <button
-            type="button"
             onClick={() => setShowPaymentSplitModal(true)}
-            className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 text-lg"
+            className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 text-sm"
             title="Split Bill"
           >
             💰
           </button>
+          <button
+            onClick={() => setShowPollModal(true)}
+            className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 text-sm"
+            title="Create Poll"
+          >
+            📊
+          </button>
+        </div>
+      </header>
+
+      {/* Message Feed */}
+      <main className="flex-1 max-w-2xl mx-auto w-full p-4 overflow-y-auto space-y-3">
+        {messages.length === 0 ? (
+          <div className="text-center py-20 text-gray-400 text-xs space-y-2">
+            <div className="text-4xl">💬</div>
+            <p className="font-semibold text-black dark:text-white">Welcome to {group.name}</p>
+            <p>Send the first message or create a poll to kick off discussion.</p>
+          </div>
+        ) : (
+          messages.map((m) => (
+            <MessageBubble
+              key={m.id}
+              message={m}
+              currentUserId={user?.id || ''}
+              onReact={(_msgId, emoji) => {
+                toast(`Reacted with ${emoji}`, 'info');
+              }}
+              onDelete={(_msgId, _forEveryone) => {
+                toast('Message deleted', 'info');
+              }}
+              onReply={(msg) => {
+                setInputText(`Replying to: "${msg.content?.slice(0, 30)}..." `);
+              }}
+              onOpenThread={(msg) => setActiveThreadMessage(msg)}
+            />
+          ))
+        )}
+        <div ref={messagesEndRef} />
+      </main>
+
+      {/* Composer */}
+      <footer className="sticky bottom-0 z-20 bg-white dark:bg-[#0B0F1A] border-t border-[#E5E7EB] dark:border-[#2A3348] p-3">
+        <form onSubmit={handleSendMessage} className="max-w-2xl mx-auto flex items-center space-x-2">
           <input
             type="text"
             value={inputText}
             onChange={(e) => setInputText(e.target.value)}
-            placeholder="Message group or mention @name…"
             disabled={cooldownRemaining > 0}
-            className="flex-1 px-4 py-2.5 rounded-2xl bg-[#F5F7FA] dark:bg-[#1A2234] border border-[#E5E7EB] dark:border-[#2A3348] text-black dark:text-white font-medium text-sm focus:outline-none focus:border-[#0E2A6E] disabled:opacity-50"
+            placeholder={
+              cooldownRemaining > 0
+                ? `Slow mode: wait ${cooldownRemaining}s...`
+                : 'Message the group...'
+            }
+            className="flex-1 px-4 py-2.5 rounded-2xl bg-[#F5F7FA] dark:bg-[#1A2234] border border-[#E5E7EB] dark:border-[#2A3348] text-xs font-semibold text-black dark:text-white focus:outline-hidden focus:border-[#0E2A6E]"
           />
           <button
             type="submit"
-            disabled={cooldownRemaining > 0 || !inputText.trim()}
-            className="w-10 h-10 rounded-full bg-[#0E2A6E] text-white flex items-center justify-center font-black shadow-md hover:bg-[#081B47] disabled:opacity-40"
+            disabled={!inputText.trim() || cooldownRemaining > 0}
+            className={`px-4 py-2.5 rounded-2xl font-bold text-xs transition-all ${
+              !inputText.trim() || cooldownRemaining > 0
+                ? 'bg-gray-300 dark:bg-gray-700 text-gray-500 cursor-not-allowed'
+                : 'bg-[#0E2A6E] text-white hover:bg-[#081B47] active:scale-95'
+            }`}
           >
-            ➤
+            {cooldownRemaining > 0 ? `${cooldownRemaining}s` : 'Send'}
           </button>
         </form>
       </footer>
 
-      {/* Poll Composer Modal */}
-      {showPollModal && (
-        <PollComposerModal
-          onSendPoll={handleSendPoll}
-          onClose={() => setShowPollModal(false)}
-        />
-      )}
-
-      {/* Group Event Modal */}
-      {showEventModal && (
-        <GroupEventModal
-          currentUserId={user?.id || 'me'}
-          groupId={groupId || 'grp_eng_core'}
-          onConfirm={handleSendEvent}
-          onClose={() => setShowGroupEventModal(false)}
-        />
-      )}
-
-      {/* Bill Split Modal */}
-      {showSplitModal && (
-        <PaymentSplitModal
-          currentUserId={user?.id || 'me'}
-          partnerName={group.name}
-          partnerId={groupId || 'grp_eng_core'}
-          onConfirm={handleSendSplit}
-          onClose={() => setShowPaymentSplitModal(false)}
-        />
-      )}
-
-      {/* Thread Drawer */}
+      {/* Sub-thread Drawer */}
       {activeThreadMessage && (
         <ThreadDrawer
           rootMessage={activeThreadMessage}
           currentUserId={user?.id || ''}
-          partnerProfile={null}
           onClose={() => setActiveThreadMessage(null)}
-          onSendThreadReply={(txt) => {
-            toast('Thread reply sent!', 'success');
+          onSendThreadReply={(_text) => {
+            toast('Thread reply posted', 'success');
           }}
         />
       )}
 
-      {/* Group Info Modal with Feature 113 Slow Mode & Feature 111 Bots */}
+      {/* Group Info Modal */}
       {showInfoModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in select-none">
-          <div className="w-full max-w-sm bg-white dark:bg-[#161B2B] rounded-3xl p-6 border border-[#E5E7EB] dark:border-[#2A3348] shadow-2xl animate-slide-up space-y-4 max-h-[85vh] overflow-y-auto">
-            <div className="flex justify-between items-center pb-2 border-b border-gray-100 dark:border-gray-800">
-              <h3 className="font-extrabold text-sm text-black dark:text-white">Group Settings & Members</h3>
-              <button onClick={() => setShowInfoModal(false)} className="p-1 text-gray-400 font-bold">✕</button>
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-[#161B2B] rounded-3xl max-w-sm w-full p-6 border border-[#E5E7EB] dark:border-[#2A3348] shadow-2xl space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-extrabold text-base text-black dark:text-white">Group Details</h3>
+              <button onClick={() => setShowInfoModal(false)} className="text-gray-400 font-bold text-sm">✕</button>
             </div>
-            <div className="text-center space-y-2">
-              <Avatar name={group.name} size="lg" className="mx-auto" />
-              <h4 className="font-black text-base text-black dark:text-white">{group.name}</h4>
-              <p className="text-xs text-[#4B5563] dark:text-[#9CA3AF]">{group.description}</p>
+            <div className="flex flex-col items-center text-center space-y-2">
+              <Avatar name={group.name} avatarUrl={group.avatar_url} size="xl" />
+              <h4 className="font-black text-lg">{group.name}</h4>
+              <p className="text-xs text-gray-500">{group.description || 'No description set.'}</p>
             </div>
-
-            {/* Feature 113: Slow Mode Setting (Admin) */}
-            <div className="p-3 bg-gray-50 dark:bg-gray-800/40 rounded-2xl text-xs space-y-2">
-              <div className="flex justify-between items-center">
-                <span className="font-extrabold text-black dark:text-white">⏱ Slow Mode</span>
-                <select
-                  value={slowModeSeconds}
-                  onChange={(e) => {
-                    const sec = parseInt(e.target.value, 10);
-                    setSlowModeSeconds(sec);
-                    toast(sec > 0 ? `Slow mode set to ${sec}s` : 'Slow mode disabled', 'info');
-                  }}
-                  className="px-2 py-1 rounded-lg bg-white dark:bg-[#1A2234] border border-gray-200 dark:border-gray-700 text-xs font-bold text-black dark:text-white"
-                >
-                  <option value="0">Off (No Delay)</option>
-                  <option value="5">5 Seconds</option>
-                  <option value="30">30 Seconds</option>
-                  <option value="60">1 Minute</option>
-                  <option value="300">5 Minutes</option>
-                </select>
+            <div className="pt-2 border-t border-gray-100 dark:border-gray-800 text-xs space-y-2 text-gray-600 dark:text-gray-300">
+              <div className="flex justify-between">
+                <span>Your Role</span>
+                <span className="font-bold uppercase text-[#0E2A6E] dark:text-[#3D6FE0]">{group.role}</span>
               </div>
-              <p className="text-[10px] text-gray-500">Each member can only send 1 message per interval.</p>
-            </div>
-
-            {/* Feature 111: Bots in group */}
-            <div className="p-3 bg-gray-50 dark:bg-gray-800/40 rounded-2xl text-xs space-y-1">
-              <div className="font-bold text-gray-500 uppercase text-[10px]">Active Bots (1)</div>
-              <div className="flex items-center space-x-2 pt-1">
-                <span className="text-base">🤖</span>
-                <div>
-                  <div className="font-bold text-black dark:text-white">Inspire CI/CD Webhook Bot</div>
-                  <div className="text-[10px] text-gray-400">Keyword: /deploy, /status</div>
-                </div>
+              <div className="flex justify-between">
+                <span>Slow Mode</span>
+                <span className="font-bold">{slowModeSeconds > 0 ? `${slowModeSeconds} seconds` : 'Disabled'}</span>
               </div>
             </div>
-
-            <div className="p-3 bg-gray-50 dark:bg-gray-800/40 rounded-2xl text-xs space-y-1">
-              <div className="font-bold text-gray-500 uppercase text-[10px]">Members (5)</div>
-              <p className="font-bold text-black dark:text-white">👑 Alex Rivera (Group Creator)</p>
-              <p className="text-gray-700 dark:text-gray-300">Jordan Lee • Maya Patel • Sam Miller</p>
-            </div>
-
             <button
-              onClick={() => {
-                toast('Left group', 'info');
-                setShowInfoModal(false);
-                navigate('/chats');
-              }}
-              className="w-full py-2.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 dark:bg-rose-950/40 dark:text-rose-400 text-xs font-bold"
+              onClick={() => setShowInfoModal(false)}
+              className="w-full py-2.5 rounded-xl bg-gray-100 dark:bg-gray-800 font-bold text-xs"
             >
-              Leave Group
+              Close
             </button>
           </div>
         </div>
+      )}
+
+      {/* Modals */}
+      {showPollModal && (
+        <PollComposerModal
+          onClose={() => setShowPollModal(false)}
+          onSendPoll={(poll) => {
+            handleCreatePoll({
+              question: poll.question,
+              options: poll.options.map((o) => o.option_text),
+              allowMultiple: Boolean(poll.allow_multiple),
+            });
+          }}
+        />
+      )}
+
+      {showEventModal && (
+        <GroupEventModal
+          currentUserId={user?.id || ''}
+          groupId={groupId || ''}
+          onClose={() => setShowGroupEventModal(false)}
+          onConfirm={(eventData) => {
+            setShowGroupEventModal(false);
+            toast(`Event "${eventData.title}" announced to group`, 'success');
+          }}
+        />
+      )}
+
+      {showSplitModal && (
+        <PaymentSplitModal
+          currentUserId={user?.id || ''}
+          partnerName={group?.name || 'Group'}
+          partnerId={groupId || ''}
+          onClose={() => setShowPaymentSplitModal(false)}
+          onConfirm={(splitData) => {
+            setShowPaymentSplitModal(false);
+            toast(`Split request "${splitData.title}" posted`, 'success');
+          }}
+        />
       )}
     </div>
   );

@@ -9,7 +9,7 @@ export const LoginPage: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const { signIn, setDemoUser } = useAuth();
+  const { signIn, enableDevDemoMode, isSupabaseConfigured } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
 
@@ -38,10 +38,12 @@ export const LoginPage: React.FC = () => {
     }
   };
 
-  const handleDemoLogin = (type: 'user' | 'admin') => {
-    setDemoUser(type);
-    toast(`Logged in as demo ${type}!`, 'success');
-    navigate(type === 'admin' ? '/admin' : '/chats');
+  const handleDevPreview = (type: 'user' | 'admin') => {
+    if (import.meta.env.DEV) {
+      enableDevDemoMode(type);
+      toast(`Active in dev sandbox as ${type}`, 'info');
+      navigate(type === 'admin' ? '/admin' : '/chats');
+    }
   };
 
   return (
@@ -59,6 +61,18 @@ export const LoginPage: React.FC = () => {
             Real-time messaging for everyone
           </p>
         </div>
+
+        {/* Supabase Unconfigured Warning */}
+        {!isSupabaseConfigured && (
+          <div className="mb-6 p-4 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 text-amber-900 dark:text-amber-200 text-xs space-y-1">
+            <span className="font-black flex items-center gap-1.5 text-xs">
+              ⚠️ Supabase Connection Required
+            </span>
+            <p className="text-[11px] leading-relaxed">
+              To log in or register real accounts, configure <code>VITE_SUPABASE_URL</code> and <code>VITE_SUPABASE_ANON_KEY</code> in your environment.
+            </p>
+          </div>
+        )}
 
         {/* Error message */}
         {errorMsg && (
@@ -78,7 +92,7 @@ export const LoginPage: React.FC = () => {
               onChange={(e) => setEmail(e.target.value)}
               placeholder="you@example.com"
               required
-              className="w-full px-4 py-3 rounded-2xl bg-[#F5F7FA] dark:bg-[#1A2234] border border-[#E5E7EB] dark:border-[#2A3348] text-black dark:text-white font-medium focus:outline-none focus:border-[#0E2A6E] dark:focus:border-[#3D6FE0] focus:ring-2 focus:ring-[#0E2A6E]/20 transition-all text-sm"
+              className="w-full px-4 py-3 rounded-2xl bg-[#F5F7FA] dark:bg-[#1A2234] border border-[#E5E7EB] dark:border-[#2A3348] text-black dark:text-white font-medium focus:outline-hidden focus:border-[#0E2A6E] dark:focus:border-[#3D6FE0] focus:ring-2 focus:ring-[#0E2A6E]/20 transition-all text-sm"
             />
           </div>
 
@@ -100,41 +114,43 @@ export const LoginPage: React.FC = () => {
               onChange={(e) => setPassword(e.target.value)}
               placeholder="••••••••"
               required
-              className="w-full px-4 py-3 rounded-2xl bg-[#F5F7FA] dark:bg-[#1A2234] border border-[#E5E7EB] dark:border-[#2A3348] text-black dark:text-white font-medium focus:outline-none focus:border-[#0E2A6E] dark:focus:border-[#3D6FE0] focus:ring-2 focus:ring-[#0E2A6E]/20 transition-all text-sm"
+              className="w-full px-4 py-3 rounded-2xl bg-[#F5F7FA] dark:bg-[#1A2234] border border-[#E5E7EB] dark:border-[#2A3348] text-black dark:text-white font-medium focus:outline-hidden focus:border-[#0E2A6E] dark:focus:border-[#3D6FE0] focus:ring-2 focus:ring-[#0E2A6E]/20 transition-all text-sm"
             />
           </div>
 
           <button
             type="submit"
             disabled={isSubmitting}
-            className="w-full mt-2 py-3.5 px-4 rounded-2xl bg-[#0E2A6E] text-white font-extrabold text-sm hover:bg-[#081B47] active:scale-95 transition-all shadow-md disabled:opacity-50"
+            className="w-full mt-2 py-3.5 px-4 rounded-2xl bg-[#0E2A6E] text-white font-extrabold text-sm hover:bg-[#081B47] active:scale-95 transition-all shadow-md disabled:opacity-50 cursor-pointer"
           >
             {isSubmitting ? 'Signing in…' : 'Sign In'}
           </button>
         </form>
 
-        {/* Demo instant test shortcuts */}
-        <div className="mt-6 pt-6 border-t border-[#E5E7EB] dark:border-[#2A3348]">
-          <p className="text-[11px] font-bold text-[#4B5563] dark:text-[#9CA3AF] text-center mb-2.5 uppercase tracking-wider">
-            Quick Instant Preview
-          </p>
-          <div className="grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              onClick={() => handleDemoLogin('user')}
-              className="py-2 px-3 rounded-xl bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-xs font-bold text-black dark:text-white transition-colors"
-            >
-              Demo User (@alex_dev)
-            </button>
-            <button
-              type="button"
-              onClick={() => handleDemoLogin('admin')}
-              className="py-2 px-3 rounded-xl bg-[#FFD700]/20 hover:bg-[#FFD700]/30 text-xs font-bold text-[#1A1A2E] dark:text-[#FFD700] transition-colors"
-            >
-              Demo Admin (Sarah)
-            </button>
+        {/* Development sandbox shortcuts only in dev mode */}
+        {import.meta.env.DEV && (
+          <div className="mt-6 pt-6 border-t border-[#E5E7EB] dark:border-[#2A3348]">
+            <p className="text-[10px] font-black text-amber-600 dark:text-amber-400 text-center mb-2.5 uppercase tracking-wider">
+              🛠️ Local Dev Sandbox Preview (Disabled in Production)
+            </p>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => handleDevPreview('user')}
+                className="py-2 px-3 rounded-xl bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 dark:hover:bg-gray-700 text-xs font-bold text-black dark:text-white transition-colors"
+              >
+                Dev User (@alex_dev)
+              </button>
+              <button
+                type="button"
+                onClick={() => handleDevPreview('admin')}
+                className="py-2 px-3 rounded-xl bg-[#FFD700]/20 hover:bg-[#FFD700]/30 text-xs font-bold text-[#1A1A2E] dark:text-[#FFD700] transition-colors"
+              >
+                Dev Admin (Sarah)
+              </button>
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Signup Link */}
         <p className="text-center text-xs font-medium text-[#4B5563] dark:text-[#9CA3AF] mt-6">

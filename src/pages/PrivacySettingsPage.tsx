@@ -4,14 +4,14 @@ import { useAuth } from '../hooks/useAuth';
 import { useToast } from '../components/Toast';
 import { UserSession } from '../types';
 import { hashPin } from '../utils/helpers';
+import { supabase, isConfigured } from '../lib/supabaseClient';
 
 interface PrivacySettingsState {
   read_receipts: boolean;
   last_seen_visibility: 'everyone' | 'contacts' | 'nobody';
-  profile_photo_visibility: 'everyone' | 'contacts';
+  profile_photo_visibility: 'everyone' | 'contacts' | 'nobody';
+  status_visibility: 'everyone' | 'contacts' | 'nobody';
   app_lock_enabled: boolean;
-  app_lock_timeout: 'immediately' | '1m' | '5m' | '15m';
-  biometrics_enabled: boolean;
   two_factor_enabled: boolean;
 }
 
@@ -20,26 +20,16 @@ export const PrivacySettingsPage: React.FC = () => {
   const { toast } = useToast();
   const navigate = useNavigate();
 
-  // Load persistent privacy settings or fallback
-  const [settings, setSettings] = useState<PrivacySettingsState>(() => {
-    const saved = localStorage.getItem(`inspire_privacy_${user?.id || 'default'}`);
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch {
-        // fallback
-      }
-    }
-    return {
-      read_receipts: true,
-      last_seen_visibility: 'everyone',
-      profile_photo_visibility: 'everyone',
-      app_lock_enabled: false,
-      app_lock_timeout: '5m',
-      biometrics_enabled: false,
-      two_factor_enabled: false,
-    };
+  const [settings, setSettings] = useState<PrivacySettingsState>({
+    read_receipts: true,
+    last_seen_visibility: 'everyone',
+    profile_photo_visibility: 'everyone',
+    status_visibility: 'everyone',
+    app_lock_enabled: false,
+    two_factor_enabled: false,
   });
+
+  const [loading, setLoading] = useState(true);
 
   // PIN modal state
   const [showPinModal, setShowPinModal] = useState(false);
@@ -49,64 +39,126 @@ export const PrivacySettingsPage: React.FC = () => {
 
   // 2FA modal state
   const [show2faModal, setShow2faModal] = useState(false);
-  const [totpSecret, setTotpSecret] = useState('JBSWY3DPEHPK3PXP');
+  const [totpQr, setTotpQr] = useState<string | null>(null);
+  const [totpSecret, setTotpSecret] = useState<string | null>(null);
+  const [factorId, setFactorId] = useState<string | null>(null);
   const [totpCode, setTotpCode] = useState('');
-  const [backupCodes, setBackupCodes] = useState<string[]>([]);
 
   // Active Sessions
-  const [sessions, setSessions] = useState<UserSession[]>([
-    {
-      id: 'sess_curr_1',
-      user_id: user?.id || 'usr_1',
-      device_label: 'Chrome on MacOS (This device)',
-      ip_address: '192.168.1.42',
-      last_active: 'Just now',
-      created_at: new Date().toISOString(),
-      is_current: true,
-      revoked: false,
-    },
-    {
-      id: 'sess_mob_2',
-      user_id: user?.id || 'usr_1',
-      device_label: 'Inspire Mobile App (iOS 17.4)',
-      ip_address: '172.56.21.90',
-      last_active: '2 hours ago',
-      created_at: new Date(Date.now() - 86400000 * 3).toISOString(),
-      is_current: false,
-      revoked: false,
-    },
-    {
-      id: 'sess_tab_3',
-      user_id: user?.id || 'usr_1',
-      device_label: 'Safari on iPad',
-      ip_address: '108.45.12.11',
-      last_active: 'Yesterday',
-      created_at: new Date(Date.now() - 86400000 * 7).toISOString(),
-      is_current: false,
-      revoked: false,
-    },
-  ]);
+  const [sessions, setSessions] = useState<UserSession[]>([]);
 
+  // Load privacy settings from Supabase privacy_settings table
   useEffect(() => {
-    localStorage.setItem(`inspire_privacy_${user?.id || 'default'}`, JSON.stringify(settings));
-  }, [settings, user?.id]);
+    if (!user) return;
 
-  const updateSetting = <K extends keyof PrivacySettingsState>(
+    const loadSettingsAndSessions = async () => {
+      setLoading(true);
+      if (isConfigured) {
+        try {
+          // Load privacy settings
+          const { data: privData } = await supabase
+            .from('privacy_settings')
+            .select('*')
+            .eq('user_id', user.id)
+            .maybeSingle();
+
+          if (privData) {
+            setSettings({
+              read_receipts: Boolean(privData.read_receipts_enabled),
+              last_seen_visibility: privData.last_seen_visibility,
+              profile_photo_visibility: privData.profile_photo_visibility,
+              status_visibility: privData.status_visibility,
+              app_lock_enabled: Boolean(user.app_lock_enabled),
+              two_factor_enabled: Boolean(user.two_factor_enabled),
+            });
+          }
+
+          // Load active sessions
+          const { data: sessData } = await supabase
+            .from('user_sessions')
+            .select('*')
+            .eq('user_id', user.id)
+            .eq('revoked', false)
+            .order('last_active', { ascending: false });
+
+          if (sessData && sessData.length > 0) {
+            setSessions(
+              sessData.map((s: any) => ({
+                id: s.id,
+                user_id: s.user_id,
+                device_label: s.device_label,
+                last_active: new Date(s.last_active).toLocaleString(),
+                created_at: s.created_at,
+                is_current: false,
+                revoked: s.revoked,
+              }))
+            );
+          } else {
+            // Default current session indicator
+            setSessions([
+              {
+                id: 'sess_curr',
+                user_id: user.id,
+                device_label: `${navigator.userAgent.includes('Mobile') ? 'Mobile Browser' : 'Desktop Browser'} (Current Session)`,
+                last_active: 'Active now',
+                created_at: new Date().toISOString(),
+                is_current: true,
+                revoked: false,
+              },
+            ]);
+          }
+        } catch (err) {
+          console.warn('Privacy settings load error:', err);
+        } finally {
+          setLoading(false);
+        }
+      } else {
+        setLoading(false);
+      }
+    };
+
+    loadSettingsAndSessions();
+  }, [user]);
+
+  const updateSetting = async <K extends keyof PrivacySettingsState>(
     key: K,
     val: PrivacySettingsState[K]
   ) => {
     setSettings((prev) => ({ ...prev, [key]: val }));
-    toast('Setting updated', 'success');
+
+    if (isConfigured && user) {
+      try {
+        const columnMap: Record<string, string> = {
+          read_receipts: 'read_receipts_enabled',
+          last_seen_visibility: 'last_seen_visibility',
+          profile_photo_visibility: 'profile_photo_visibility',
+          status_visibility: 'status_visibility',
+        };
+
+        const dbCol = columnMap[key as string];
+        if (dbCol) {
+          await supabase.from('privacy_settings').upsert({
+            user_id: user.id,
+            [dbCol]: val,
+          });
+        }
+      } catch (err) {
+        console.warn('Failed to persist privacy setting:', err);
+      }
+    }
+
+    toast('Privacy preferences updated', 'success');
   };
 
-  const handleToggleAppLock = () => {
+  const handleToggleAppLock = async () => {
     if (settings.app_lock_enabled) {
-      // disable lock
       updateSetting('app_lock_enabled', false);
-      localStorage.removeItem(`inspire_app_lock_pin_${user?.id}`);
+      if (isConfigured && user) {
+        await supabase.from('profiles').update({ app_lock_enabled: false }).eq('id', user.id);
+        await supabase.from('app_lock_pins').delete().eq('user_id', user.id);
+      }
       toast('App lock disabled', 'info');
     } else {
-      // open pin setup
       setPinInput('');
       setPinConfirm('');
       setPinStep('create');
@@ -114,319 +166,260 @@ export const PrivacySettingsPage: React.FC = () => {
     }
   };
 
-  const handleSavePin = async () => {
+  const handleSavePin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!user) return;
+
     if (pinStep === 'create') {
-      if (pinInput.length !== 4 || !/^\d{4}$/.test(pinInput)) {
-        toast('PIN must be 4 digits', 'error');
+      if (pinInput.length < 4) {
+        toast('PIN must be at least 4 digits', 'error');
         return;
       }
       setPinStep('confirm');
-      return;
-    }
-
-    if (pinInput !== pinConfirm) {
-      toast('PINs do not match. Try again.', 'error');
-      setPinStep('create');
-      setPinInput('');
-      setPinConfirm('');
-      return;
-    }
-
-    const hashed = await hashPin(pinInput);
-    localStorage.setItem(`inspire_app_lock_pin_${user?.id}`, hashed);
-    updateSetting('app_lock_enabled', true);
-    setShowPinModal(false);
-    toast('App lock activated with 4-digit PIN!', 'success');
-  };
-
-  const handleToggle2fa = () => {
-    if (settings.two_factor_enabled) {
-      updateSetting('two_factor_enabled', false);
-      setBackupCodes([]);
-      toast('2FA disabled', 'info');
     } else {
-      // Generate mock backup codes
-      const codes = Array.from({ length: 6 }, () =>
-        Math.random().toString(36).substring(2, 8).toUpperCase()
-      );
-      setBackupCodes(codes);
-      setTotpCode('');
-      setShow2faModal(true);
+      if (pinInput !== pinConfirm) {
+        toast('PIN entries do not match', 'error');
+        setPinConfirm('');
+        return;
+      }
+
+      const hash = await hashPin(pinInput);
+
+      if (isConfigured) {
+        try {
+          await supabase.from('app_lock_pins').upsert({
+            user_id: user.id,
+            pin_hash: hash,
+            updated_at: new Date().toISOString(),
+          });
+          await supabase.from('profiles').update({ app_lock_enabled: true }).eq('id', user.id);
+        } catch (err) {
+          console.warn('Failed to save PIN:', err);
+        }
+      }
+
+      updateSetting('app_lock_enabled', true);
+      setShowPinModal(false);
+      toast('App lock PIN enabled securely', 'success');
     }
   };
 
-  const handleVerify2fa = () => {
-    if (totpCode.trim().length !== 6) {
-      toast('Enter a valid 6-digit code', 'error');
+  const handleEnroll2fa = async () => {
+    if (!isConfigured) {
+      toast('Real 2FA TOTP requires Supabase Auth connection', 'info');
       return;
     }
-    updateSetting('two_factor_enabled', true);
-    setShow2faModal(false);
-    toast('Two-Factor Authentication successfully activated!', 'success');
+
+    try {
+      // Supabase Auth MFA Enroll API
+      const { data, error } = await supabase.auth.mfa.enroll({ factorType: 'totp' });
+      if (error) {
+        toast(error.message, 'error');
+        return;
+      }
+      if (data) {
+        setFactorId(data.id);
+        setTotpQr(data.totp.qr_code);
+        setTotpSecret(data.totp.secret);
+        setShow2faModal(true);
+      }
+    } catch (err) {
+      toast('2FA setup failed', 'error');
+    }
   };
 
-  const handleRevokeSession = (sessionId: string) => {
+  const handleVerify2fa = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!factorId || !totpCode.trim() || !user) return;
+
+    try {
+      const challenge = await supabase.auth.mfa.challenge({ factorId });
+      if (challenge.error) {
+        toast(challenge.error.message, 'error');
+        return;
+      }
+
+      const verify = await supabase.auth.mfa.verify({
+        factorId,
+        challengeId: challenge.data.id,
+        code: totpCode.trim(),
+      });
+
+      if (verify.error) {
+        toast(verify.error.message, 'error');
+        return;
+      }
+
+      await supabase.from('profiles').update({ two_factor_enabled: true }).eq('id', user.id);
+      updateSetting('two_factor_enabled', true);
+      setShow2faModal(false);
+      toast('Two-Factor Authentication (TOTP) successfully activated!', 'success');
+    } catch (err) {
+      toast('2FA verification error', 'error');
+    }
+  };
+
+  const handleRevokeSession = async (sessionId: string) => {
+    if (isConfigured && user) {
+      try {
+        await supabase
+          .from('user_sessions')
+          .update({ revoked: true })
+          .eq('id', sessionId)
+          .eq('user_id', user.id);
+      } catch (err) {
+        console.warn('Session revoke error:', err);
+      }
+    }
+
     setSessions((prev) => prev.filter((s) => s.id !== sessionId));
-    toast('Device session revoked', 'info');
-  };
-
-  const handleRevokeAllOtherSessions = () => {
-    setSessions((prev) => prev.filter((s) => s.is_current));
-    toast('Logged out from all other devices', 'success');
+    toast('Session revoked. Device will be logged out on next request.', 'success');
   };
 
   return (
     <div className="min-h-screen bg-white dark:bg-[#0B0F1A] text-black dark:text-white pb-24">
       {/* Header */}
-      <header className="sticky top-0 z-30 bg-white/95 dark:bg-[#0B0F1A]/95 backdrop-blur-md border-b border-[#E5E7EB] dark:border-[#2A3348] px-4 py-3.5">
-        <div className="max-w-md mx-auto flex items-center justify-between">
-          <div className="flex items-center space-x-3">
-            <button
-              onClick={() => navigate('/profile')}
-              className="p-1 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 text-lg"
-              aria-label="Back to profile"
-            >
-              ←
-            </button>
-            <h1 className="text-lg font-black text-black dark:text-white">
+      <header className="sticky top-0 z-30 bg-white/95 dark:bg-[#0B0F1A]/95 backdrop-blur-md border-b border-[#E5E7EB] dark:border-[#2A3348] px-4 py-3.5 flex items-center justify-between">
+        <div className="flex items-center space-x-3">
+          <button
+            onClick={() => navigate('/profile')}
+            className="w-8 h-8 rounded-full flex items-center justify-center text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800"
+          >
+            ←
+          </button>
+          <div className="flex items-center space-x-2">
+            <div className="w-8 h-8 rounded-xl bg-[#0E2A6E] text-[#FFD700] flex items-center justify-center font-black text-sm">
+              🛡️
+            </div>
+            <h1 className="text-xl font-extrabold text-black dark:text-white">
               Privacy & Security
             </h1>
           </div>
-          <span className="text-xl">🔒</span>
         </div>
       </header>
 
-      <main className="max-w-md mx-auto px-4 py-6 space-y-6">
-        {/* Section 1: Visibility & Privacy */}
-        <section className="bg-white dark:bg-[#161B2B] rounded-3xl p-5 border border-[#E5E7EB] dark:border-[#2A3348] shadow-sm space-y-4">
-          <h2 className="font-extrabold text-xs uppercase tracking-wider text-[#0E2A6E] dark:text-[#3D6FE0]">
-            Visibility & Status
+      {/* Main Settings */}
+      <main className="max-w-md mx-auto px-4 py-4 space-y-6">
+        {/* Visibility Controls */}
+        <div className="bg-white dark:bg-[#161B2B] p-5 rounded-3xl border border-[#E5E7EB] dark:border-[#2A3348] shadow-sm space-y-4">
+          <h2 className="text-xs font-bold uppercase tracking-wider text-[#4B5563] dark:text-[#9CA3AF]">
+            Visibility Controls
           </h2>
 
-          {/* Read Receipts */}
-          <div className="flex items-center justify-between py-2 border-b border-[#E5E7EB] dark:border-[#2A3348]">
-            <div>
-              <p className="font-bold text-xs">Read Receipts</p>
-              <p className="text-[11px] text-[#4B5563] dark:text-[#9CA3AF]">
-                Show two blue ticks when messages have been read
-              </p>
-            </div>
-            <button
-              onClick={() => updateSetting('read_receipts', !settings.read_receipts)}
-              className={`w-12 h-6 rounded-full transition-colors relative ${
-                settings.read_receipts ? 'bg-[#0E2A6E]' : 'bg-gray-300 dark:bg-gray-700'
-              }`}
-            >
-              <span
-                className={`absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${
-                  settings.read_receipts ? 'translate-x-6' : ''
-                }`}
-              />
-            </button>
-          </div>
-
-          {/* Last Seen */}
-          <div className="flex items-center justify-between py-2 border-b border-[#E5E7EB] dark:border-[#2A3348]">
-            <div>
-              <p className="font-bold text-xs">Last Seen & Online</p>
-              <p className="text-[11px] text-[#4B5563] dark:text-[#9CA3AF]">
-                Who can see when you were last online
-              </p>
-            </div>
-            <select
-              value={settings.last_seen_visibility}
-              onChange={(e) =>
-                updateSetting(
-                  'last_seen_visibility',
-                  e.target.value as 'everyone' | 'contacts' | 'nobody'
-                )
-              }
-              className="text-xs font-bold px-2 py-1 rounded-xl bg-[#F5F7FA] dark:bg-[#1A2234] border border-[#E5E7EB] dark:border-[#2A3348]"
-            >
-              <option value="everyone">Everyone</option>
-              <option value="contacts">Contacts</option>
-              <option value="nobody">Nobody</option>
-            </select>
-          </div>
-
-          {/* Profile Photo */}
-          <div className="flex items-center justify-between py-2">
-            <div>
-              <p className="font-bold text-xs">Profile Photo</p>
-              <p className="text-[11px] text-[#4B5563] dark:text-[#9CA3AF]">
-                Who can view your profile avatar
-              </p>
-            </div>
-            <select
-              value={settings.profile_photo_visibility}
-              onChange={(e) =>
-                updateSetting(
-                  'profile_photo_visibility',
-                  e.target.value as 'everyone' | 'contacts'
-                )
-              }
-              className="text-xs font-bold px-2 py-1 rounded-xl bg-[#F5F7FA] dark:bg-[#1A2234] border border-[#E5E7EB] dark:border-[#2A3348]"
-            >
-              <option value="everyone">Everyone</option>
-              <option value="contacts">My Contacts</option>
-            </select>
-          </div>
-        </section>
-
-        {/* Section 2: App Protection & PIN */}
-        <section className="bg-white dark:bg-[#161B2B] rounded-3xl p-5 border border-[#E5E7EB] dark:border-[#2A3348] shadow-sm space-y-4">
-          <h2 className="font-extrabold text-xs uppercase tracking-wider text-[#0E2A6E] dark:text-[#3D6FE0]">
-            App Lock & Biometrics
-          </h2>
-
-          <div className="flex items-center justify-between py-2 border-b border-[#E5E7EB] dark:border-[#2A3348]">
-            <div>
-              <p className="font-bold text-xs">Require PIN to Open App</p>
-              <p className="text-[11px] text-[#4B5563] dark:text-[#9CA3AF]">
-                Protect Inspire with a 4-digit passcode
-              </p>
-            </div>
-            <button
-              onClick={handleToggleAppLock}
-              className={`w-12 h-6 rounded-full transition-colors relative ${
-                settings.app_lock_enabled ? 'bg-[#0E2A6E]' : 'bg-gray-300 dark:bg-gray-700'
-              }`}
-            >
-              <span
-                className={`absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${
-                  settings.app_lock_enabled ? 'translate-x-6' : ''
-                }`}
-              />
-            </button>
-          </div>
-
-          {settings.app_lock_enabled && (
-            <>
-              <div className="flex items-center justify-between py-2 border-b border-[#E5E7EB] dark:border-[#2A3348]">
-                <p className="font-bold text-xs">Auto-Lock Delay</p>
-                <select
-                  value={settings.app_lock_timeout}
-                  onChange={(e) =>
-                    updateSetting(
-                      'app_lock_timeout',
-                      e.target.value as 'immediately' | '1m' | '5m' | '15m'
-                    )
-                  }
-                  className="text-xs font-bold px-2 py-1 rounded-xl bg-[#F5F7FA] dark:bg-[#1A2234] border border-[#E5E7EB] dark:border-[#2A3348]"
-                >
-                  <option value="immediately">Immediately</option>
-                  <option value="1m">After 1 minute</option>
-                  <option value="5m">After 5 minutes</option>
-                  <option value="15m">After 15 minutes</option>
-                </select>
+          <div className="space-y-4 divide-y divide-gray-100 dark:divide-gray-800 text-xs">
+            {/* Read Receipts */}
+            <div className="flex items-center justify-between pt-2">
+              <div>
+                <span className="font-bold block text-sm">Read Receipts</span>
+                <span className="text-gray-500 text-[11px]">
+                  Double blue/accent ticks when messages are read
+                </span>
               </div>
-
-              <div className="flex items-center justify-between py-2">
-                <div>
-                  <p className="font-bold text-xs">Unlock with Face ID / Fingerprint</p>
-                  <p className="text-[11px] text-[#4B5563] dark:text-[#9CA3AF]">
-                    Use WebAuthn biometric sensors if supported
-                  </p>
-                </div>
-                <button
-                  onClick={() =>
-                    updateSetting('biometrics_enabled', !settings.biometrics_enabled)
-                  }
-                  className={`w-12 h-6 rounded-full transition-colors relative ${
-                    settings.biometrics_enabled ? 'bg-[#0E2A6E]' : 'bg-gray-300 dark:bg-gray-700'
-                  }`}
-                >
-                  <span
-                    className={`absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${
-                      settings.biometrics_enabled ? 'translate-x-6' : ''
-                    }`}
-                  />
-                </button>
-              </div>
-            </>
-          )}
-
-          {/* Quick link to Secret Vault */}
-          <button
-            onClick={() => navigate('/secret-chats')}
-            className="w-full mt-2 py-2.5 px-3 rounded-2xl bg-gray-50 dark:bg-gray-800/40 border border-[#E5E7EB] dark:border-[#2A3348] text-xs font-bold flex items-center justify-between hover:bg-gray-100 dark:hover:bg-gray-800"
-          >
-            <div className="flex items-center space-x-2">
-              <span>🔏</span>
-              <span>Manage Secret Chats Vault</span>
+              <input
+                type="checkbox"
+                checked={settings.read_receipts}
+                onChange={(e) => updateSetting('read_receipts', e.target.checked)}
+                className="w-5 h-5 accent-[#0E2A6E] cursor-pointer"
+              />
             </div>
-            <span className="text-gray-400">→</span>
-          </button>
-        </section>
 
-        {/* Section 3: Two-Factor Authentication */}
-        <section className="bg-white dark:bg-[#161B2B] rounded-3xl p-5 border border-[#E5E7EB] dark:border-[#2A3348] shadow-sm space-y-4">
-          <h2 className="font-extrabold text-xs uppercase tracking-wider text-[#0E2A6E] dark:text-[#3D6FE0]">
-            Authentication Security
+            {/* Last Seen Visibility */}
+            <div className="flex items-center justify-between pt-4">
+              <div>
+                <span className="font-bold block text-sm">Last Seen & Online</span>
+                <span className="text-gray-500 text-[11px]">Who can see your online status</span>
+              </div>
+              <select
+                value={settings.last_seen_visibility}
+                onChange={(e) => updateSetting('last_seen_visibility', e.target.value as any)}
+                className="px-2.5 py-1.5 rounded-xl bg-[#F5F7FA] dark:bg-[#1A2234] border border-[#E5E7EB] dark:border-[#2A3348] font-bold"
+              >
+                <option value="everyone">Everyone</option>
+                <option value="contacts">My Contacts</option>
+                <option value="nobody">Nobody</option>
+              </select>
+            </div>
+
+            {/* Profile Photo Visibility */}
+            <div className="flex items-center justify-between pt-4">
+              <div>
+                <span className="font-bold block text-sm">Profile Photo</span>
+                <span className="text-gray-500 text-[11px]">Who can view your avatar</span>
+              </div>
+              <select
+                value={settings.profile_photo_visibility}
+                onChange={(e) => updateSetting('profile_photo_visibility', e.target.value as any)}
+                className="px-2.5 py-1.5 rounded-xl bg-[#F5F7FA] dark:bg-[#1A2234] border border-[#E5E7EB] dark:border-[#2A3348] font-bold"
+              >
+                <option value="everyone">Everyone</option>
+                <option value="contacts">My Contacts</option>
+                <option value="nobody">Nobody</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        {/* Account Security */}
+        <div className="bg-white dark:bg-[#161B2B] p-5 rounded-3xl border border-[#E5E7EB] dark:border-[#2A3348] shadow-sm space-y-4">
+          <h2 className="text-xs font-bold uppercase tracking-wider text-[#4B5563] dark:text-[#9CA3AF]">
+            Security Protection
           </h2>
 
-          <div className="flex items-center justify-between py-2">
-            <div>
-              <p className="font-bold text-xs">Two-Factor Authentication (2FA)</p>
-              <p className="text-[11px] text-[#4B5563] dark:text-[#9CA3AF]">
-                Requires a one-time code from Google Authenticator or Authy
-              </p>
-            </div>
-            <button
-              onClick={handleToggle2fa}
-              className={`w-12 h-6 rounded-full transition-colors relative ${
-                settings.two_factor_enabled ? 'bg-[#0E2A6E]' : 'bg-gray-300 dark:bg-gray-700'
-              }`}
-            >
-              <span
-                className={`absolute top-1 left-1 bg-white w-4 h-4 rounded-full transition-transform ${
-                  settings.two_factor_enabled ? 'translate-x-6' : ''
-                }`}
-              />
-            </button>
-          </div>
-        </section>
-
-        {/* Section 4: Active Devices & Sessions */}
-        <section className="bg-white dark:bg-[#161B2B] rounded-3xl p-5 border border-[#E5E7EB] dark:border-[#2A3348] shadow-sm space-y-4">
-          <div className="flex items-center justify-between">
-            <h2 className="font-extrabold text-xs uppercase tracking-wider text-[#0E2A6E] dark:text-[#3D6FE0]">
-              Active Devices ({sessions.length})
-            </h2>
-            {sessions.length > 1 && (
+          <div className="space-y-4 divide-y divide-gray-100 dark:divide-gray-800 text-xs">
+            {/* App Lock */}
+            <div className="flex items-center justify-between pt-2">
+              <div>
+                <span className="font-bold block text-sm">App Lock (PIN)</span>
+                <span className="text-gray-500 text-[11px]">Require salted hash PIN on app open</span>
+              </div>
               <button
-                onClick={handleRevokeAllOtherSessions}
-                className="text-[11px] font-bold text-rose-500 hover:underline"
+                onClick={handleToggleAppLock}
+                className={`px-3 py-1.5 rounded-full font-bold text-xs ${
+                  settings.app_lock_enabled ? 'bg-red-500 text-white' : 'bg-[#0E2A6E] text-white'
+                }`}
               >
-                Log out others
+                {settings.app_lock_enabled ? 'Disable' : 'Enable'}
               </button>
-            )}
-          </div>
+            </div>
 
-          <div className="space-y-3">
-            {sessions.map((sess) => (
-              <div
-                key={sess.id}
-                className="p-3 rounded-2xl bg-gray-50 dark:bg-gray-800/40 border border-[#E5E7EB] dark:border-[#2A3348] flex items-center justify-between"
+            {/* 2FA / TOTP */}
+            <div className="flex items-center justify-between pt-4">
+              <div>
+                <span className="font-bold block text-sm">Two-Factor Auth (TOTP)</span>
+                <span className="text-gray-500 text-[11px]">
+                  {settings.two_factor_enabled ? 'Active • Authenticator app verified' : 'Authenticator app protection'}
+                </span>
+              </div>
+              <button
+                onClick={handleEnroll2fa}
+                disabled={settings.two_factor_enabled}
+                className={`px-3 py-1.5 rounded-full font-bold text-xs ${
+                  settings.two_factor_enabled ? 'bg-emerald-600 text-white' : 'bg-[#0E2A6E] text-white'
+                }`}
               >
-                <div>
-                  <div className="flex items-center space-x-2">
-                    <span className="font-bold text-xs">{sess.device_label}</span>
-                    {sess.is_current && (
-                      <span className="px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 font-extrabold text-[10px]">
-                        Current
-                      </span>
-                    )}
-                  </div>
-                  <p className="text-[10px] text-gray-400 mt-0.5">
-                    IP: {sess.ip_address} • Active: {sess.last_active}
-                  </p>
-                </div>
+                {settings.two_factor_enabled ? 'Active ✓' : 'Setup 2FA'}
+              </button>
+            </div>
+          </div>
+        </div>
 
+        {/* Active Sessions */}
+        <div className="bg-white dark:bg-[#161B2B] p-5 rounded-3xl border border-[#E5E7EB] dark:border-[#2A3348] shadow-sm space-y-3">
+          <h2 className="text-xs font-bold uppercase tracking-wider text-[#4B5563] dark:text-[#9CA3AF]">
+            Active Sessions & Devices
+          </h2>
+
+          <div className="divide-y divide-gray-100 dark:divide-gray-800 text-xs">
+            {sessions.map((sess) => (
+              <div key={sess.id} className="flex items-center justify-between py-3">
+                <div>
+                  <div className="font-bold text-black dark:text-white">{sess.device_label}</div>
+                  <div className="text-[11px] text-gray-400">{sess.last_active}</div>
+                </div>
                 {!sess.is_current && (
                   <button
                     onClick={() => handleRevokeSession(sess.id)}
-                    className="px-2.5 py-1 rounded-xl bg-rose-50 dark:bg-rose-950/30 text-rose-600 dark:text-rose-400 text-[10px] font-bold hover:bg-rose-100"
+                    className="px-2.5 py-1 rounded-lg bg-red-100 dark:bg-red-950/40 text-red-600 dark:text-red-400 font-bold text-[11px] hover:bg-red-200"
                   >
                     Revoke
                   </button>
@@ -434,129 +427,93 @@ export const PrivacySettingsPage: React.FC = () => {
               </div>
             ))}
           </div>
-        </section>
+        </div>
       </main>
 
       {/* PIN Setup Modal */}
       {showPinModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
-          <div className="w-full max-w-xs bg-white dark:bg-[#161B2B] rounded-3xl p-6 border border-[#E5E7EB] dark:border-[#2A3348] shadow-2xl text-center space-y-4">
-            <div className="w-12 h-12 mx-auto rounded-2xl bg-[#0E2A6E] text-[#FFD700] flex items-center justify-center text-xl font-bold">
-              🔑
-            </div>
-            <div>
-              <h3 className="font-extrabold text-sm text-black dark:text-white">
-                {pinStep === 'create' ? 'Set 4-Digit Passcode' : 'Confirm Passcode'}
-              </h3>
-              <p className="text-[11px] text-[#4B5563] dark:text-[#9CA3AF] mt-1">
-                {pinStep === 'create'
-                  ? 'Enter 4 numbers to lock Inspire'
-                  : 'Re-enter your 4-digit code to confirm'}
-              </p>
-            </div>
-
-            <input
-              type="password"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              maxLength={4}
-              value={pinStep === 'create' ? pinInput : pinConfirm}
-              onChange={(e) =>
-                pinStep === 'create'
-                  ? setPinInput(e.target.value)
-                  : setPinConfirm(e.target.value)
-              }
-              placeholder="••••"
-              className="w-32 mx-auto text-center tracking-[0.5em] text-2xl font-black py-2 rounded-2xl bg-[#F5F7FA] dark:bg-[#1A2234] border border-[#E5E7EB] dark:border-[#2A3348] focus:outline-none focus:border-[#0E2A6E]"
-            />
-
-            <div className="flex space-x-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setShowPinModal(false)}
-                className="flex-1 py-2.5 rounded-2xl border border-gray-300 dark:border-gray-700 text-xs font-bold"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleSavePin}
-                className="flex-1 py-2.5 rounded-2xl bg-[#0E2A6E] text-white text-xs font-bold hover:bg-[#081B47]"
-              >
-                {pinStep === 'create' ? 'Next' : 'Save PIN'}
-              </button>
-            </div>
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-[#161B2B] rounded-3xl max-w-sm w-full p-6 border border-[#E5E7EB] dark:border-[#2A3348] shadow-2xl space-y-4">
+            <h3 className="font-black text-base text-black dark:text-white">
+              {pinStep === 'create' ? 'Create 4-Digit Security PIN' : 'Confirm Your PIN'}
+            </h3>
+            <p className="text-xs text-gray-500">
+              {pinStep === 'create'
+                ? 'Enter a memorable PIN to protect Inspire on this device.'
+                : 'Re-enter your PIN to verify.'}
+            </p>
+            <form onSubmit={handleSavePin} className="space-y-4">
+              <input
+                type="password"
+                maxLength={6}
+                value={pinStep === 'create' ? pinInput : pinConfirm}
+                onChange={(e) => (pinStep === 'create' ? setPinInput(e.target.value) : setPinConfirm(e.target.value))}
+                placeholder="••••"
+                className="w-full text-center tracking-widest text-2xl font-black px-4 py-3 rounded-2xl bg-gray-100 dark:bg-gray-800 text-black dark:text-white focus:outline-hidden"
+              />
+              <div className="flex space-x-2">
+                <button
+                  type="button"
+                  onClick={() => setShowPinModal(false)}
+                  className="flex-1 py-2 rounded-xl bg-gray-200 dark:bg-gray-700 text-xs font-bold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2 rounded-xl bg-[#0E2A6E] text-white text-xs font-bold"
+                >
+                  {pinStep === 'create' ? 'Next' : 'Save PIN'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
 
-      {/* 2FA Enrollment Modal */}
+      {/* 2FA TOTP Enrollment Modal */}
       {show2faModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
-          <div className="w-full max-w-sm bg-white dark:bg-[#161B2B] rounded-3xl p-6 border border-[#E5E7EB] dark:border-[#2A3348] shadow-2xl space-y-4">
-            <div className="text-center">
-              <div className="w-12 h-12 mx-auto rounded-2xl bg-[#FFD700] text-[#1A1A2E] flex items-center justify-center text-xl font-bold mb-2">
-                📲
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-[#161B2B] rounded-3xl max-w-sm w-full p-6 border border-[#E5E7EB] dark:border-[#2A3348] shadow-2xl space-y-4">
+            <h3 className="font-black text-base text-black dark:text-white">Scan in Authenticator App</h3>
+            <p className="text-xs text-gray-500">
+              Use Google Authenticator, Authy, or 1Password to scan this QR code or enter the secret code.
+            </p>
+            {totpQr && (
+              <div className="flex justify-center p-2 bg-white rounded-2xl">
+                <img src={totpQr} alt="TOTP QR" className="w-44 h-44" />
               </div>
-              <h3 className="font-extrabold text-sm text-black dark:text-white">
-                Set Up Two-Factor Authentication
-              </h3>
-              <p className="text-[11px] text-[#4B5563] dark:text-[#9CA3AF] mt-1">
-                Scan with your authenticator app or enter the setup key:
-              </p>
-            </div>
-
-            <div className="p-3 bg-gray-50 dark:bg-gray-800/40 rounded-2xl text-center border border-[#E5E7EB] dark:border-[#2A3348]">
-              <code className="text-xs font-mono font-bold tracking-widest text-[#0E2A6E] dark:text-[#3D6FE0]">
+            )}
+            {totpSecret && (
+              <div className="bg-gray-100 dark:bg-gray-800 p-2.5 rounded-xl text-center text-xs font-mono select-all">
                 {totpSecret}
-              </code>
-            </div>
-
-            <div>
-              <label className="block text-[11px] font-bold text-gray-500 mb-1">
-                Enter 6-digit confirmation code
-              </label>
+              </div>
+            )}
+            <form onSubmit={handleVerify2fa} className="space-y-3">
               <input
                 type="text"
                 maxLength={6}
                 value={totpCode}
-                onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, ''))}
-                placeholder="000 000"
-                className="w-full text-center tracking-[0.3em] font-black text-lg py-2.5 rounded-2xl bg-[#F5F7FA] dark:bg-[#1A2234] border border-[#E5E7EB] dark:border-[#2A3348] focus:outline-none"
+                onChange={(e) => setTotpCode(e.target.value)}
+                placeholder="6-digit code"
+                className="w-full text-center text-xl font-bold tracking-widest px-4 py-2.5 rounded-xl bg-gray-100 dark:bg-gray-800"
               />
-            </div>
-
-            {backupCodes.length > 0 && (
-              <div className="p-3 bg-amber-500/10 rounded-2xl border border-amber-500/30">
-                <p className="text-[10px] font-bold text-amber-600 dark:text-amber-400 mb-1">
-                  Save Your Emergency Backup Codes:
-                </p>
-                <div className="grid grid-cols-2 gap-1 font-mono text-[10px]">
-                  {backupCodes.map((c, i) => (
-                    <span key={i} className="text-gray-600 dark:text-gray-300 font-semibold">
-                      {c}
-                    </span>
-                  ))}
-                </div>
+              <div className="flex space-x-2">
+                <button
+                  type="button"
+                  onClick={() => setShow2faModal(false)}
+                  className="flex-1 py-2 rounded-xl bg-gray-200 dark:bg-gray-700 text-xs font-bold"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="flex-1 py-2 rounded-xl bg-[#0E2A6E] text-white text-xs font-bold"
+                >
+                  Verify & Activate
+                </button>
               </div>
-            )}
-
-            <div className="flex space-x-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setShow2faModal(false)}
-                className="flex-1 py-2.5 rounded-2xl border border-gray-300 dark:border-gray-700 text-xs font-bold"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleVerify2fa}
-                className="flex-1 py-2.5 rounded-2xl bg-[#0E2A6E] text-white text-xs font-bold hover:bg-[#081B47]"
-              >
-                Enable 2FA
-              </button>
-            </div>
+            </form>
           </div>
         </div>
       )}

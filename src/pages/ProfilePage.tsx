@@ -71,7 +71,7 @@ const DEFAULT_BADGES: UserBadge[] = [
 ];
 
 export const ProfilePage: React.FC = () => {
-  const { user, signOut, updateProfile, isAdmin, setDemoUser } = useAuth();
+  const { user, signOut, updateProfile, isAdmin, enableDevDemoMode } = useAuth();
   const { uploadMedia, isUploading } = useMediaUpload();
   const { toast } = useToast();
   const navigate = useNavigate();
@@ -876,26 +876,28 @@ export const ProfilePage: React.FC = () => {
             <span className="text-amber-500 font-bold">30d Grace</span>
           </button>
 
-          {/* Switch persona demo button for fast testing */}
-          <button
-            type="button"
-            onClick={() => {
-              if (isAdmin) {
-                setDemoUser('user');
-                toast('Switched to User profile (@alex_dev)', 'info');
-              } else {
-                setDemoUser('admin');
-                toast('Switched to Admin profile (Sarah)', 'info');
-              }
-            }}
-            className="w-full p-4 rounded-2xl bg-white dark:bg-[#161B2B] border border-[#E5E7EB] dark:border-[#2A3348] flex items-center justify-between text-xs font-bold hover:bg-gray-50 dark:hover:bg-gray-800/40 text-left"
-          >
-            <div className="flex items-center space-x-2.5">
-              <span>🔄</span>
-              <span>Switch to {isAdmin ? 'Standard User' : 'Admin'} Mode</span>
-            </div>
-            <span className="text-gray-400">Toggle</span>
-          </button>
+          {/* Switch persona demo button for fast testing (DEV only) */}
+          {import.meta.env.DEV && (
+            <button
+              type="button"
+              onClick={() => {
+                if (isAdmin) {
+                  enableDevDemoMode('user');
+                  toast('Switched to User profile (@alex_dev)', 'info');
+                } else {
+                  enableDevDemoMode('admin');
+                  toast('Switched to Admin profile (Sarah)', 'info');
+                }
+              }}
+              className="w-full p-4 rounded-2xl bg-white dark:bg-[#161B2B] border border-[#E5E7EB] dark:border-[#2A3348] flex items-center justify-between text-xs font-bold hover:bg-gray-50 dark:hover:bg-gray-800/40 text-left"
+            >
+              <div className="flex items-center space-x-2.5">
+                <span>🔄</span>
+                <span>Switch to {isAdmin ? 'Standard User' : 'Admin'} Mode</span>
+              </div>
+              <span className="text-gray-400">Toggle</span>
+            </button>
+          )}
 
           <button
             type="button"

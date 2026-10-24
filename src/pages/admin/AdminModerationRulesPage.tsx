@@ -3,57 +3,48 @@ import { AdminSidebar } from '../../components/admin/AdminSidebar';
 import { useToast } from '../../components/Toast';
 import { useAuth } from '../../hooks/useAuth';
 import { ModerationRule } from '../../types';
+import { supabase, isConfigured } from '../../lib/supabaseClient';
 
 export const AdminModerationRulesPage: React.FC = () => {
   const { user } = useAuth();
   const { toast } = useToast();
 
-  const [rules, setRules] = useState<ModerationRule[]>(() => {
-    const saved = localStorage.getItem('inspire_moderation_rules');
-    if (saved) {
-      try {
-        return JSON.parse(saved);
-      } catch {
-        // fallback
-      }
-    }
-    return [
-      {
-        id: 'rule_1',
-        keyword_pattern: 'free crypto\\b|bonus deposit',
-        action: 'auto_hide',
-        created_by: user?.id || 'admin',
-        created_at: new Date(Date.now() - 86400000 * 5).toISOString(),
-      },
-      {
-        id: 'rule_2',
-        keyword_pattern: 'telegram\\.me\\/|t\\.me\\/join',
-        action: 'flag',
-        created_by: user?.id || 'admin',
-        created_at: new Date(Date.now() - 86400000 * 3).toISOString(),
-      },
-      {
-        id: 'rule_3',
-        keyword_pattern: 'password\\s*reset\\s*link',
-        action: 'flag',
-        created_by: user?.id || 'admin',
-        created_at: new Date(Date.now() - 86400000).toISOString(),
-      },
-    ];
-  });
-
+  const [rules, setRules] = useState<ModerationRule[]>([]);
+  const [loading, setLoading] = useState(true);
   const [patternInput, setPatternInput] = useState('');
   const [actionInput, setActionInput] = useState<'flag' | 'auto_hide'>('flag');
   const [testText, setTestText] = useState('');
   const [testResult, setTestResult] = useState<{ matched: boolean; rule?: string } | null>(null);
 
-  useEffect(() => {
-    localStorage.setItem('inspire_moderation_rules', JSON.stringify(rules));
-  }, [rules]);
+  const loadRules = async () => {
+    setLoading(true);
+    if (isConfigured) {
+      try {
+        const { data, error } = await supabase
+          .from('moderation_rules')
+          .select('*')
+          .order('created_at', { ascending: false });
 
-  const handleAddRule = (e: React.FormEvent) => {
+        if (!error && data) {
+          setRules(data as ModerationRule[]);
+        }
+      } catch (err) {
+        console.warn('Failed to load moderation rules:', err);
+      } finally {
+        setLoading(false);
+      }
+    } else {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    loadRules();
+  }, []);
+
+  const handleAddRule = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!patternInput.trim()) return;
+    if (!patternInput.trim() || !user) return;
 
     try {
       new RegExp(patternInput.trim(), 'i');
@@ -62,20 +53,55 @@ export const AdminModerationRulesPage: React.FC = () => {
       return;
     }
 
-    const newRule: ModerationRule = {
-      id: `rule_${Date.now()}`,
+    const payload = {
       keyword_pattern: patternInput.trim(),
       action: actionInput,
-      created_by: user?.id || 'admin',
-      created_at: new Date().toISOString(),
+      created_by: user.id,
     };
 
-    setRules([newRule, ...rules]);
+    if (isConfigured) {
+      try {
+        const { data, error } = await supabase
+          .from('moderation_rules')
+          .insert(payload)
+          .select()
+          .single();
+
+        if (error) {
+          toast(error.message, 'error');
+          return;
+        }
+
+        if (data) {
+          setRules((prev) => [data as ModerationRule, ...prev]);
+        }
+      } catch (err: any) {
+        toast(err.message, 'error');
+        return;
+      }
+    } else {
+      const newRule: ModerationRule = {
+        id: `rule_${Date.now()}`,
+        keyword_pattern: patternInput.trim(),
+        action: actionInput,
+        created_by: user.id,
+        created_at: new Date().toISOString(),
+      };
+      setRules([newRule, ...rules]);
+    }
+
     setPatternInput('');
     toast('Keyword moderation rule added successfully', 'success');
   };
 
-  const handleDeleteRule = (id: string) => {
+  const handleDeleteRule = async (id: string) => {
+    if (isConfigured) {
+      try {
+        await supabase.from('moderation_rules').delete().eq('id', id);
+      } catch (err) {
+        console.warn('Delete rule error:', err);
+      }
+    }
     setRules(rules.filter((r) => r.id !== id));
     toast('Moderation rule deleted', 'info');
   };
@@ -106,73 +132,81 @@ export const AdminModerationRulesPage: React.FC = () => {
       <div className="space-y-6">
         <div>
           <h1 className="text-xl font-black text-black dark:text-white">
-            Automated Keyword Moderation Rules
+            Automated Moderation Rules Engine
           </h1>
           <p className="text-xs text-[#4B5563] dark:text-[#9CA3AF] mt-1">
-            Configure automated regex and keyword filters to automatically flag or hide malicious messages before they reach recipient screens.
+            Define keyword patterns and regex filters that automatically flag or auto-hide abusive messages in real time without waiting for user reports (Feature 58).
           </p>
         </div>
 
-        {/* Add Rule Card */}
-        <div className="bg-white dark:bg-[#161B2B] rounded-3xl p-5 border border-[#E5E7EB] dark:border-[#2A3348] shadow-sm">
-          <h2 className="font-extrabold text-sm mb-4">Add Moderation Rule</h2>
-          <form onSubmit={handleAddRule} className="grid grid-cols-1 md:grid-cols-3 gap-3 items-end">
-            <div className="md:col-span-2">
-              <label className="block text-xs font-bold uppercase tracking-wider text-black dark:text-gray-200 mb-1.5">
-                Regex Keyword Pattern
+        {/* Add Rule Form */}
+        <div className="bg-white dark:bg-[#161B2B] rounded-3xl p-5 border border-[#E5E7EB] dark:border-[#2A3348] shadow-sm space-y-4">
+          <h2 className="text-xs font-bold uppercase tracking-wider text-[#4B5563] dark:text-[#9CA3AF]">
+            Create Keyword Rule
+          </h2>
+
+          <form onSubmit={handleAddRule} className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="sm:col-span-2">
+              <label className="text-[11px] font-bold text-gray-500 block mb-1">
+                Keyword or Regex Pattern
               </label>
               <input
                 type="text"
+                required
                 value={patternInput}
                 onChange={(e) => setPatternInput(e.target.value)}
-                placeholder="e.g. bitcoin|t\\.me\\/join|phishing-link"
-                required
-                className="w-full px-4 py-2.5 rounded-2xl bg-[#F5F7FA] dark:bg-[#1A2234] border border-[#E5E7EB] dark:border-[#2A3348] text-xs font-mono focus:outline-none focus:border-[#0E2A6E]"
+                placeholder="e.g. crypto.*airdrop|telegram\.me\/"
+                className="w-full px-3.5 py-2.5 rounded-xl bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-xs font-mono focus:outline-hidden"
               />
             </div>
 
             <div>
-              <label className="block text-xs font-bold uppercase tracking-wider text-black dark:text-gray-200 mb-1.5">
+              <label className="text-[11px] font-bold text-gray-500 block mb-1">
                 Automated Action
               </label>
               <select
                 value={actionInput}
-                onChange={(e) => setActionInput(e.target.value as 'flag' | 'auto_hide')}
-                className="w-full px-3 py-2.5 rounded-2xl bg-[#F5F7FA] dark:bg-[#1A2234] border border-[#E5E7EB] dark:border-[#2A3348] text-xs font-bold focus:outline-none"
+                onChange={(e) => setActionInput(e.target.value as any)}
+                className="w-full px-3.5 py-2.5 rounded-xl bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-xs font-bold"
               >
                 <option value="flag">Flag for Moderator Review</option>
-                <option value="auto_hide">Auto-Hide & Block</option>
+                <option value="auto_hide">Auto-Hide Message Instantly</option>
               </select>
             </div>
 
-            <div className="md:col-span-3 flex justify-end">
+            <div className="sm:col-span-3 flex justify-end">
               <button
                 type="submit"
-                className="px-5 py-2.5 rounded-2xl bg-[#0E2A6E] text-white text-xs font-bold hover:bg-[#081B47] transition-all shadow-sm"
+                className="px-5 py-2 rounded-xl bg-[#0E2A6E] text-white text-xs font-bold hover:bg-[#081B47]"
               >
-                + Save Rule
+                + Add Moderation Rule
               </button>
             </div>
           </form>
         </div>
 
-        {/* Realtime Pattern Tester */}
+        {/* Live Rule Sandbox Tester */}
         <div className="bg-white dark:bg-[#161B2B] rounded-3xl p-5 border border-[#E5E7EB] dark:border-[#2A3348] shadow-sm space-y-3">
-          <h2 className="font-extrabold text-sm">Live Regex Tester</h2>
-          <div className="flex space-x-2">
+          <h2 className="text-xs font-bold uppercase tracking-wider text-[#4B5563] dark:text-[#9CA3AF]">
+            Rule Sandbox Tester
+          </h2>
+          <div className="flex gap-2">
             <input
               type="text"
               value={testText}
-              onChange={(e) => setTestText(e.target.value)}
-              placeholder="Type test message content to verify keyword matching..."
-              className="flex-1 px-4 py-2 rounded-2xl bg-[#F5F7FA] dark:bg-[#1A2234] border border-[#E5E7EB] dark:border-[#2A3348] text-xs focus:outline-none"
+              onChange={(e) => {
+                setTestText(e.target.value);
+                setTestResult(null);
+              }}
+              placeholder="Type a sample message to check against active rules..."
+              className="flex-1 px-3.5 py-2 rounded-xl bg-gray-50 dark:bg-gray-800 border text-xs"
             />
             <button
               type="button"
               onClick={handleTestRegex}
-              className="px-4 py-2 rounded-2xl bg-gray-100 dark:bg-gray-800 text-xs font-bold hover:bg-gray-200"
+              className="px-4 py-2 rounded-xl bg-gray-200 dark:bg-gray-700 text-xs font-bold"
             >
-              Test Rules
+              Test
             </button>
           </div>
 
@@ -180,66 +214,63 @@ export const AdminModerationRulesPage: React.FC = () => {
             <div
               className={`p-3 rounded-2xl text-xs font-bold ${
                 testResult.matched
-                  ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20'
-                  : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20'
+                  ? 'bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-300 border border-red-200'
+                  : 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200'
               }`}
             >
               {testResult.matched
-                ? `⚠️ MATCHED rule pattern: "${testResult.rule}". This message would be triggered.`
-                : '✅ Clean: No active moderation rules matched this text.'}
+                ? `⚠️ MATCHED rule: /${testResult.rule}/i — Message would trigger action`
+                : '✓ PASSED: Message does not trigger any active moderation rule'}
             </div>
           )}
         </div>
 
-        {/* Existing Rules Table */}
-        <div className="bg-white dark:bg-[#161B2B] rounded-3xl border border-[#E5E7EB] dark:border-[#2A3348] shadow-sm overflow-hidden">
-          <div className="p-4 border-b border-[#E5E7EB] dark:border-[#2A3348] flex justify-between items-center">
-            <h2 className="font-extrabold text-sm">Active Rules ({rules.length})</h2>
-          </div>
+        {/* Rules Table */}
+        <div className="bg-white dark:bg-[#161B2B] rounded-3xl p-5 border border-[#E5E7EB] dark:border-[#2A3348] shadow-sm space-y-3">
+          <h2 className="text-xs font-bold uppercase tracking-wider text-[#4B5563] dark:text-[#9CA3AF]">
+            Active Keyword Rules ({rules.length})
+          </h2>
 
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-gray-50 dark:bg-gray-800/40 text-[#4B5563] dark:text-[#9CA3AF] uppercase text-[10px] tracking-wider font-bold">
-                <tr>
-                  <th className="py-3 px-4">Keyword Pattern</th>
-                  <th className="py-3 px-4">Action</th>
-                  <th className="py-3 px-4">Created</th>
-                  <th className="py-3 px-4 text-right">Delete</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#E5E7EB] dark:divide-[#2A3348]">
-                {rules.map((rule) => (
-                  <tr key={rule.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/20">
-                    <td className="py-3 px-4 font-mono font-bold text-[#0E2A6E] dark:text-[#3D6FE0]">
-                      {rule.keyword_pattern}
-                    </td>
-                    <td className="py-3 px-4">
+          {loading ? (
+            <div className="flex items-center justify-center py-10">
+              <div className="w-8 h-8 border-3 border-[#0E2A6E] border-t-transparent rounded-full animate-spin" />
+            </div>
+          ) : rules.length === 0 ? (
+            <p className="text-xs text-gray-400 py-6 text-center">No moderation rules configured.</p>
+          ) : (
+            <div className="divide-y divide-gray-100 dark:divide-gray-800">
+              {rules.map((rule) => (
+                <div key={rule.id} className="py-3 flex items-center justify-between">
+                  <div className="space-y-1">
+                    <span className="font-mono text-xs font-black text-[#0E2A6E] dark:text-[#3D6FE0]">
+                      /{rule.keyword_pattern}/i
+                    </span>
+                    <div className="flex items-center space-x-2">
                       <span
-                        className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase ${
+                        className={`text-[9px] px-2 py-0.5 rounded-full font-black uppercase ${
                           rule.action === 'auto_hide'
-                            ? 'bg-rose-500/10 text-rose-600'
-                            : 'bg-amber-500/10 text-amber-600'
+                            ? 'bg-red-100 text-red-800'
+                            : 'bg-amber-100 text-amber-800'
                         }`}
                       >
-                        {rule.action}
+                        {rule.action.replace('_', ' ')}
                       </span>
-                    </td>
-                    <td className="py-3 px-4 text-gray-400">
-                      {new Date(rule.created_at).toLocaleDateString()}
-                    </td>
-                    <td className="py-3 px-4 text-right">
-                      <button
-                        onClick={() => handleDeleteRule(rule.id)}
-                        className="px-2.5 py-1 rounded-xl bg-rose-50 dark:bg-rose-950/20 text-rose-600 dark:text-rose-400 font-bold hover:bg-rose-100"
-                      >
-                        Remove
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                      <span className="text-[10px] text-gray-400">
+                        Added: {new Date(rule.created_at).toLocaleDateString()}
+                      </span>
+                    </div>
+                  </div>
+
+                  <button
+                    onClick={() => handleDeleteRule(rule.id)}
+                    className="p-1.5 rounded-lg text-red-500 hover:bg-red-50 text-xs font-bold"
+                  >
+                    Delete
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </AdminSidebar>

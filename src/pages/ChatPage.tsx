@@ -567,9 +567,11 @@ export const ChatPage: React.FC = () => {
     setShowOverflowMenu(false);
     const textMsgs = messages.filter((m) => m.content).slice(-30).map((m) => m.content || '');
     const mood = await workerApi.getConversationMood(textMsgs);
-    setMoodData(mood);
-    setShowMoodBanner(true);
-    toast(`Mood Analyzed: ${mood.mood_label} ${mood.mood_emoji}`, 'info');
+    if (mood) {
+      setMoodData(mood);
+      setShowMoodBanner(true);
+      toast(`Mood Analyzed: ${mood.mood_label} ${mood.mood_emoji}`, 'info');
+    }
   };
 
   // Feature 101: Sentiment Timeline

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { BottomNav } from '../components/BottomNav';
 import { Avatar } from '../components/Avatar';
@@ -7,77 +7,143 @@ import { useToast } from '../components/Toast';
 import { useAuth } from '../hooks/useAuth';
 import { CallRecord, Profile } from '../types';
 import { formatDuration } from '../utils/helpers';
-
-const SEED_CALLS: CallRecord[] = [
-  {
-    id: 'call_1',
-    caller_id: 'usr_jordan',
-    callee_id: '11111111-1111-4111-8111-111111111111',
-    type: 'video',
-    status: 'answered',
-    started_at: new Date(Date.now() - 3600000 * 3).toISOString(),
-    duration_seconds: 412,
-    partner: {
-      id: 'usr_jordan',
-      username: 'jordan_ai',
-      display_name: 'Jordan Lee',
-      bio: null,
-      avatar_url: null,
-      role: 'user',
-      status: 'active',
-      is_online: true,
-      last_seen: new Date().toISOString(),
-      created_at: '2026-01-15T09:00:00Z',
-    },
-  },
-  {
-    id: 'call_2',
-    caller_id: 'usr_maya',
-    callee_id: '11111111-1111-4111-8111-111111111111',
-    type: 'voice',
-    status: 'missed',
-    started_at: new Date(Date.now() - 3600000 * 24).toISOString(),
-    duration_seconds: 0,
-    partner: {
-      id: 'usr_maya',
-      username: 'maya_tech',
-      display_name: 'Maya Patel',
-      bio: null,
-      avatar_url: null,
-      role: 'user',
-      status: 'active',
-      is_online: true,
-      last_seen: new Date().toISOString(),
-      created_at: '2026-02-01T11:00:00Z',
-    },
-  },
-];
+import { supabase, isConfigured } from '../lib/supabaseClient';
 
 export const CallsPage: React.FC = () => {
-  const { user, isAdmin } = useAuth();
+  const { user } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
 
-  const [calls, setCalls] = useState<CallRecord[]>(SEED_CALLS);
+  const [calls, setCalls] = useState<CallRecord[]>([]);
+  const [contacts, setContacts] = useState<Profile[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [showContactPicker, setShowContactPicker] = useState(false);
   const [activeCall, setActiveCall] = useState<{ partner: Profile; type: 'voice' | 'video' } | null>(null);
 
+  // Load real call history from Supabase calls table
+  useEffect(() => {
+    if (!user) return;
+
+    const loadCallsAndContacts = async () => {
+      setLoading(true);
+      if (isConfigured) {
+        try {
+          // Fetch calls
+          const { data: callRows, error: callErr } = await supabase
+            .from('calls')
+            .select(`
+              id,
+              caller_id,
+              callee_id,
+              type,
+              status,
+              started_at,
+              duration_seconds,
+              caller:profiles!caller_id(id, username, display_name, avatar_url),
+              callee:profiles!callee_id(id, username, display_name, avatar_url)
+            `)
+            .or(`caller_id.eq.${user.id},callee_id.eq.${user.id}`)
+            .order('started_at', { ascending: false });
+
+          if (callErr) {
+            console.warn('Error loading calls:', callErr.message);
+          } else if (callRows) {
+            const formatted: CallRecord[] = callRows.map((c: any) => {
+              const isCaller = c.caller_id === user.id;
+              const partnerProfile = isCaller ? c.callee : c.caller;
+              return {
+                id: c.id,
+                caller_id: c.caller_id,
+                callee_id: c.callee_id,
+                type: c.type,
+                status: c.status,
+                started_at: c.started_at,
+                duration_seconds: c.duration_seconds || 0,
+                partner: partnerProfile || {
+                  id: isCaller ? c.callee_id : c.caller_id,
+                  username: 'user',
+                  display_name: 'Contact',
+                  bio: null,
+                  avatar_url: null,
+                  role: 'user',
+                  status: 'active',
+                  is_online: false,
+                  last_seen: new Date().toISOString(),
+                  created_at: new Date().toISOString(),
+                },
+              };
+            });
+            setCalls(formatted);
+          }
+
+          // Fetch contacts for New Call picker
+          const { data: contactRows } = await supabase
+            .from('contacts')
+            .select('contact:profiles!contact_id(*)')
+            .eq('user_id', user.id);
+
+          if (contactRows) {
+            setContacts(contactRows.map((cr: any) => cr.contact).filter(Boolean));
+          }
+        } catch (err) {
+          console.warn('Calls fetch exception:', err);
+        } finally {
+          setLoading(false);
+        }
+      } else {
+        setLoading(false);
+      }
+    };
+
+    loadCallsAndContacts();
+  }, [user]);
+
   const handleStartCall = (partner: Profile, type: 'voice' | 'video') => {
+    setShowContactPicker(false);
     setActiveCall({ partner, type });
   };
 
-  const handleEndCall = (duration: number) => {
+  const handleEndCall = async (duration: number) => {
     if (activeCall && user) {
-      const newRecord: CallRecord = {
-        id: `call_${Date.now()}`,
+      const callData = {
         caller_id: user.id,
         callee_id: activeCall.partner.id,
         type: activeCall.type,
-        status: 'answered',
-        started_at: new Date().toISOString(),
+        status: duration > 0 ? 'answered' : 'missed',
         duration_seconds: duration,
-        partner: activeCall.partner,
+        started_at: new Date().toISOString(),
       };
-      setCalls((prev) => [newRecord, ...prev]);
+
+      if (isConfigured) {
+        try {
+          const { data, error } = await supabase
+            .from('calls')
+            .insert(callData)
+            .select()
+            .single();
+
+          if (!error && data) {
+            const newRecord: CallRecord = {
+              id: data.id,
+              ...callData,
+              status: callData.status as 'answered' | 'missed' | 'declined',
+              partner: activeCall.partner,
+            };
+            setCalls((prev) => [newRecord, ...prev]);
+          }
+        } catch (err) {
+          console.warn('Failed to persist call record:', err);
+        }
+      } else {
+        const localRecord: CallRecord = {
+          id: `call_${Date.now()}`,
+          ...callData,
+          status: callData.status as 'answered' | 'missed' | 'declined',
+          partner: activeCall.partner,
+        };
+        setCalls((prev) => [localRecord, ...prev]);
+      }
+
       toast(`Call ended (${formatDuration(duration)})`, 'info');
     }
     setActiveCall(null);
@@ -97,8 +163,8 @@ export const CallsPage: React.FC = () => {
             </h1>
           </div>
           <button
-            onClick={() => handleStartCall(SEED_CALLS[0].partner!, 'video')}
-            className="px-3.5 py-1.5 rounded-full bg-[#0E2A6E] text-white text-xs font-bold shadow-sm active:scale-95"
+            onClick={() => setShowContactPicker(true)}
+            className="px-3.5 py-1.5 rounded-full bg-[#0E2A6E] text-white text-xs font-bold shadow-sm active:scale-95 cursor-pointer hover:bg-[#081B47]"
           >
             + New Call
           </button>
@@ -107,53 +173,63 @@ export const CallsPage: React.FC = () => {
 
       {/* Main List */}
       <main className="max-w-md mx-auto px-4 py-3">
-        {calls.length === 0 ? (
-          <div className="text-center py-16 text-gray-500 text-xs">
-            No calls recorded yet.
+        {loading ? (
+          <div className="flex items-center justify-center py-16">
+            <div className="w-8 h-8 border-3 border-[#0E2A6E] border-t-transparent rounded-full animate-spin" />
+          </div>
+        ) : calls.length === 0 ? (
+          <div className="text-center py-16 text-gray-500 text-xs space-y-3">
+            <div className="text-4xl">📞</div>
+            <p className="font-semibold text-black dark:text-white">No calls recorded yet</p>
+            <p className="text-gray-400">Start an encrypted real-time audio or video call with any contact.</p>
+            <button
+              onClick={() => setShowContactPicker(true)}
+              className="mt-2 px-4 py-2 rounded-xl bg-[#0E2A6E] text-white font-bold text-xs"
+            >
+              Start First Call
+            </button>
           </div>
         ) : (
           <div className="divide-y divide-[#E5E7EB] dark:divide-[#2A3348]">
             {calls.map((call) => (
               <div
                 key={call.id}
-                className="flex items-center justify-between py-3.5 px-2 rounded-2xl hover:bg-gray-50 dark:hover:bg-gray-800/40"
+                className="flex items-center justify-between py-3.5 px-2 rounded-2xl hover:bg-gray-50 dark:hover:bg-gray-800/40 transition-colors"
               >
                 <div className="flex items-center space-x-3">
-                  <Avatar name={call.partner?.display_name || 'Contact'} size="md" />
+                  <Avatar
+                    name={call.partner?.display_name || 'User'}
+                    avatarUrl={call.partner?.avatar_url}
+                    size="md"
+                  />
                   <div>
-                    <h4 className="font-extrabold text-sm text-black dark:text-white">
-                      {call.partner?.display_name}
-                    </h4>
-                    <div className="flex items-center space-x-1.5 text-xs text-[#4B5563] dark:text-[#9CA3AF] mt-0.5">
-                      <span className={call.status === 'missed' ? 'text-rose-500 font-bold' : 'text-emerald-600'}>
-                        {call.status === 'missed' ? '↙ Missed' : '↗ Answered'}
+                    <h3 className="font-bold text-sm text-black dark:text-white">
+                      {call.partner?.display_name || 'Contact'}
+                    </h3>
+                    <div className="flex items-center space-x-1.5 text-[11px] text-[#4B5563] dark:text-[#9CA3AF]">
+                      <span className={call.status === 'missed' ? 'text-red-500 font-bold' : 'text-emerald-500 font-bold'}>
+                        {call.status === 'missed' ? '↙ Missed' : '↗ ' + (call.type === 'video' ? 'Video' : 'Voice')}
                       </span>
                       <span>•</span>
-                      <span>{new Date(call.started_at).toLocaleDateString()}</span>
-                      {call.duration_seconds > 0 && (
-                        <>
-                          <span>•</span>
-                          <span>{formatDuration(call.duration_seconds)}</span>
-                        </>
-                      )}
+                      <span>
+                        {call.duration_seconds ? formatDuration(call.duration_seconds) : new Date(call.started_at).toLocaleDateString()}
+                      </span>
                     </div>
                   </div>
                 </div>
 
-                <div className="flex items-center space-x-1.5">
+                <div className="flex items-center space-x-2">
                   <button
                     onClick={() => call.partner && handleStartCall(call.partner, 'voice')}
-                    className="p-2.5 rounded-full bg-gray-100 hover:bg-gray-200 dark:bg-gray-800 text-sm transition-transform active:scale-90"
-                    title="Voice Call"
-                    aria-label="Start voice call"
+                    className="w-8 h-8 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 flex items-center justify-center text-sm hover:bg-[#0E2A6E] hover:text-white transition-colors"
+                    title="Start Voice Call"
                   >
                     📞
                   </button>
                   <button
                     onClick={() => call.partner && handleStartCall(call.partner, 'video')}
-                    className="p-2.5 rounded-full bg-[#0E2A6E] text-white text-sm transition-transform active:scale-90 shadow-sm"
-                    title="Video Call"
-                    aria-label="Start video call"
+                    className="w-8 h-8 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 flex items-center justify-center text-sm hover:bg-[#0E2A6E] hover:text-white transition-colors"
+                    title="Start Video Call"
                   >
                     📹
                   </button>
@@ -164,7 +240,67 @@ export const CallsPage: React.FC = () => {
         )}
       </main>
 
-      {/* Active Call Full Screen Interface */}
+      {/* Contact Picker Modal for New Call */}
+      {showContactPicker && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-[#161B2B] rounded-3xl max-w-sm w-full p-5 border border-[#E5E7EB] dark:border-[#2A3348] shadow-2xl space-y-4">
+            <div className="flex items-center justify-between">
+              <h3 className="font-extrabold text-base text-black dark:text-white">Select Contact to Call</h3>
+              <button
+                onClick={() => setShowContactPicker(false)}
+                className="text-gray-400 hover:text-gray-600 text-sm font-bold"
+              >
+                ✕
+              </button>
+            </div>
+
+            {contacts.length === 0 ? (
+              <div className="text-center py-6 text-xs text-gray-500 space-y-2">
+                <p>No contacts found in your contact list.</p>
+                <button
+                  onClick={() => {
+                    setShowContactPicker(false);
+                    navigate('/chats');
+                  }}
+                  className="px-3 py-1.5 rounded-full bg-[#0E2A6E] text-white font-bold"
+                >
+                  Add Contacts in Chats
+                </button>
+              </div>
+            ) : (
+              <div className="divide-y divide-gray-100 dark:divide-gray-800 max-h-60 overflow-y-auto">
+                {contacts.map((contact) => (
+                  <div key={contact.id} className="flex items-center justify-between py-2.5">
+                    <div className="flex items-center space-x-2.5">
+                      <Avatar name={contact.display_name} avatarUrl={contact.avatar_url} size="sm" />
+                      <div>
+                        <div className="text-xs font-bold">{contact.display_name}</div>
+                        <div className="text-[10px] text-gray-400">@{contact.username}</div>
+                      </div>
+                    </div>
+                    <div className="flex items-center space-x-1.5">
+                      <button
+                        onClick={() => handleStartCall(contact, 'voice')}
+                        className="px-2.5 py-1 rounded-lg bg-gray-100 dark:bg-gray-800 text-xs font-bold hover:bg-[#0E2A6E] hover:text-white"
+                      >
+                        Voice
+                      </button>
+                      <button
+                        onClick={() => handleStartCall(contact, 'video')}
+                        className="px-2.5 py-1 rounded-lg bg-[#0E2A6E] text-white text-xs font-bold"
+                      >
+                        Video
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Active WebRTC Call Screen Modal */}
       {activeCall && (
         <CallModal
           partner={activeCall.partner}
@@ -173,7 +309,7 @@ export const CallsPage: React.FC = () => {
         />
       )}
 
-      <BottomNav isAdmin={isAdmin} />
+      <BottomNav />
     </div>
   );
 };
