@@ -151,9 +151,31 @@ export function useMessages(partnerId: string) {
 
           if (isThisChat) {
             setMessages((prev) => {
-              // Avoid duplicates if optimistically added
-              if (prev.some((m) => m.id === newMsg.id)) {
-                return prev.map((m) => (m.id === newMsg.id ? { ...m, ...newMsg } : m));
+              // Realtime can arrive before insert() resolves, so reconcile by
+              // conversation payload as well as database ID to avoid duplicates.
+              const existingIndex = prev.findIndex((m) => m.id === newMsg.id);
+              if (existingIndex >= 0) {
+                return prev.map((m, index) => index === existingIndex
+                  ? { ...m, ...newMsg, reactions: m.reactions || newMsg.reactions || [] }
+                  : m);
+              }
+
+              const optimisticIndex = newMsg.sender_id === user.id
+                ? prev.findIndex((m) =>
+                    m.id.startsWith('temp_') &&
+                    m.sender_id === newMsg.sender_id &&
+                    m.receiver_id === newMsg.receiver_id &&
+                    m.message_type === newMsg.message_type &&
+                    (m.content || null) === (newMsg.content || null) &&
+                    (m.media_url || null) === (newMsg.media_url || null) &&
+                    Math.abs(new Date(m.created_at).getTime() - new Date(newMsg.created_at).getTime()) < 15000
+                  )
+                : -1;
+
+              if (optimisticIndex >= 0) {
+                return prev.map((m, index) => index === optimisticIndex
+                  ? { ...newMsg, reactions: [] }
+                  : m);
               }
               return [...prev, { ...newMsg, reactions: [] }];
             });
@@ -202,6 +224,10 @@ export function useMessages(partnerId: string) {
     });
   }, []);
 
+  const removeLocalMessage = useCallback((messageId: string) => {
+    setMessages((prev) => prev.filter((message) => message.id !== messageId));
+  }, []);
+
   const sendMessage = async (
     content: string,
     messageType: MessageType = 'text',
@@ -227,6 +253,7 @@ export function useMessages(partnerId: string) {
       read_at: null,
       created_at: new Date().toISOString(),
       reactions: [],
+      delivery_status: 'sending',
       reply_to: replyToId ? messages.find((m) => m.id === replyToId) || null : null,
     };
 
@@ -253,19 +280,26 @@ export function useMessages(partnerId: string) {
         .select()
         .single();
 
-      if (error) {
+      if (error || !data) {
         console.warn('Failed to insert message into Supabase:', error);
-        return optimisticMessage;
+        setMessages((prev) => prev.map((m) => m.id === tempId ? { ...m, delivery_status: 'failed' } : m));
+        return null;
       }
 
       const savedMessage = data as Message;
-      setMessages((prev) =>
-        prev.map((m) => (m.id === tempId ? { ...savedMessage, reactions: [] } : m))
-      );
+      setMessages((prev) => {
+        if (prev.some((m) => m.id === savedMessage.id)) {
+          return prev.filter((m) => m.id !== tempId).map((m) =>
+            m.id === savedMessage.id ? { ...m, ...savedMessage, reactions: m.reactions || [] } : m
+          );
+        }
+        return prev.map((m) => m.id === tempId ? { ...savedMessage, reactions: [] } : m);
+      });
       return savedMessage;
     } catch (err) {
       console.warn('Exception sending message:', err);
-      return optimisticMessage;
+      setMessages((prev) => prev.map((m) => m.id === tempId ? { ...m, delivery_status: 'failed' } : m));
+      return null;
     }
   };
 
@@ -372,6 +406,7 @@ export function useMessages(partnerId: string) {
     addReaction,
     markAsRead,
     addLocalMessage,
+    removeLocalMessage,
     refreshMessages: loadMessages,
   };
 }

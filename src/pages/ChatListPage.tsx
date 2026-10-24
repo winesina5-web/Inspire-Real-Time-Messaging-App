@@ -177,12 +177,17 @@ export const ChatListPage: React.FC = () => {
       // Fetch user's contacts
       const { data: contactsData } = await supabase
         .from('contacts')
-        .select('contact_id, profile:contact_id (*)')
+        .select('contact_id, custom_name, profile:contact_id (*)')
         .eq('user_id', user.id);
 
       const loadedContacts = (contactsData || [])
-        .map((c: { profile: unknown }) => c.profile as Profile)
-        .filter(Boolean);
+        .map((contact: { profile: unknown; custom_name?: string | null }) => {
+          const profile = contact.profile as Profile | null;
+          return profile
+            ? { ...profile, display_name: contact.custom_name?.trim() || profile.display_name }
+            : null;
+        })
+        .filter((profile): profile is Profile => Boolean(profile));
       setContacts(loadedContacts);
 
       // Fetch all messages visible to me to aggregate conversations correctly
@@ -403,20 +408,60 @@ export const ChatListPage: React.FC = () => {
     }
 
     try {
-      // Mutual insert A->B and B->A per 05_Backend_Schema
-      await supabase.from('contacts').insert([
-        { user_id: user.id, contact_id: contactUser.id },
-        { user_id: contactUser.id, contact_id: user.id },
-      ]);
+      // Each user may create only their own contact row under RLS.
+      const enteredName = window.prompt(
+        'Custom name for this contact (optional):',
+        contactUser.display_name || contactUser.username || ''
+      );
+      const customName = enteredName?.trim() || null;
+      const { error } = await supabase.from('contacts').upsert(
+        { user_id: user.id, contact_id: contactUser.id, custom_name: customName },
+        { onConflict: 'user_id,contact_id' }
+      );
+      if (error) throw error;
 
-      setContacts((prev) => [...prev, contactUser]);
+      const contactToShow = customName ? { ...contactUser, display_name: customName } : contactUser;
+      setContacts((prev) => {
+        const withoutExisting = prev.filter((contact) => contact.id !== contactUser.id);
+        return [...withoutExisting, contactToShow];
+      });
       toast(`Added @${contactUser.username} to contacts!`, 'success');
       setShowAddModal(false);
       navigate(`/chat/${contactUser.id}`);
     } catch (err) {
       console.warn('Add contact error:', err);
-      toast('Failed to add contact', 'error');
+      toast(err instanceof Error ? err.message : 'Failed to add contact', 'error');
     }
+  };
+
+  const handleRenameContact = async (contact: Profile) => {
+    if (!user) return;
+    const entered = window.prompt('Custom name for this contact:', contact.display_name || contact.username || '');
+    if (entered === null) return;
+    const customName = entered.trim() || null;
+
+    if (isConfigured) {
+      const { error } = await supabase
+        .from('contacts')
+        .update({ custom_name: customName })
+        .eq('user_id', user.id)
+        .eq('contact_id', contact.id);
+      if (error) {
+        toast('Could not save custom contact name.', 'error');
+        console.warn('Rename contact failed:', error);
+        return;
+      }
+    }
+
+    let displayName = customName;
+    if (!displayName && isConfigured) {
+      const { data } = await supabase.from('profiles').select('display_name').eq('id', contact.id).maybeSingle();
+      displayName = data?.display_name || contact.username || 'Contact';
+    }
+    setContacts((prev) => prev.map((item) =>
+      item.id === contact.id ? { ...item, display_name: displayName || contact.username || 'Contact' } : item
+    ));
+    toast(customName ? 'Contact name saved.' : 'Custom name removed.', 'success');
   };
 
   const totalUnread = useMemo(() => {
@@ -443,9 +488,54 @@ export const ChatListPage: React.FC = () => {
     }
   };
 
-  const handleCreateGroup = (e: React.FormEvent) => {
+  const handleCreateGroup = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newGroupName.trim() || !user) return;
+
+    if (isConfigured) {
+      try {
+        const { data: createdGroup, error: groupError } = await supabase
+          .from('groups')
+          .insert({
+            name: newGroupName.trim(),
+            description: newGroupDesc.trim() || null,
+            avatar_url: null,
+            created_by: user.id,
+          })
+          .select('*')
+          .single();
+
+        if (groupError || !createdGroup) {
+          console.warn('Group creation failed:', groupError);
+          toast(groupError?.message || 'Could not create group. Please try again.', 'error');
+          return;
+        }
+
+        const { error: memberError } = await supabase.from('group_members').insert({
+          group_id: createdGroup.id,
+          user_id: user.id,
+          role: 'admin',
+        });
+        if (memberError) {
+          console.warn('Group membership creation failed:', memberError);
+          await supabase.from('groups').delete().eq('id', createdGroup.id);
+          toast('Group was created but membership could not be saved. Please try again.', 'error');
+          return;
+        }
+
+        setShowCreateGroupModal(false);
+        setNewGroupName('');
+        setNewGroupDesc('');
+        toast(`Group "${createdGroup.name}" created!`, 'success');
+        navigate(`/group/${createdGroup.id}`);
+        return;
+      } catch (err) {
+        console.warn('Group creation exception:', err);
+        toast('Could not create group. Please try again.', 'error');
+        return;
+      }
+    }
+
     const newGrp: Group = {
       id: `grp_${Date.now()}`,
       name: newGroupName.trim(),
@@ -930,12 +1020,21 @@ export const ChatListPage: React.FC = () => {
                     </div>
                   </div>
 
-                  <button
-                    onClick={() => navigate(`/chat/${contact.id}`)}
-                    className="px-3 py-1.5 rounded-xl bg-[#0E2A6E] text-white text-xs font-bold hover:bg-[#081B47] active:scale-95 shadow-sm"
-                  >
-                    Message
-                  </button>
+                  <div className="flex items-center space-x-1.5">
+                    <button
+                      onClick={() => handleRenameContact(contact)}
+                      className="px-2.5 py-1.5 rounded-xl border border-gray-200 dark:border-gray-700 text-xs font-bold hover:bg-gray-100 dark:hover:bg-gray-800"
+                      title="Set a custom contact name"
+                    >
+                      Rename
+                    </button>
+                    <button
+                      onClick={() => navigate(`/chat/${contact.id}`)}
+                      className="px-3 py-1.5 rounded-xl bg-[#0E2A6E] text-white text-xs font-bold hover:bg-[#081B47] active:scale-95 shadow-sm"
+                    >
+                      Message
+                    </button>
+                  </div>
                 </div>
               ))}
 
