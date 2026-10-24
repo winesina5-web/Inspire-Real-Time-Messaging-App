@@ -24,8 +24,15 @@ export function useVoiceRecorder() {
     setRecordingDuration(0);
 
     try {
+      if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+        throw new Error('Voice recording is not supported in this browser.');
+      }
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
+      const preferredTypes = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus'];
+      const supportedType = preferredTypes.find((type) => MediaRecorder.isTypeSupported(type));
+      const mediaRecorder = supportedType
+        ? new MediaRecorder(stream, { mimeType: supportedType })
+        : new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
 
       mediaRecorder.ondataavailable = (event) => {
@@ -50,7 +57,7 @@ export function useVoiceRecorder() {
       }, 1000);
     } catch (err) {
       console.warn('Microphone access denied or unavailable:', err);
-      setPermissionError('Microphone permission required for voice notes');
+      setPermissionError(err instanceof Error ? err.message : 'Microphone permission required for voice notes');
       setIsRecording(false);
     }
   }, []);
@@ -65,13 +72,14 @@ export function useVoiceRecorder() {
         return;
       }
 
-      mediaRecorderRef.current.addEventListener('stop', () => {
-        const mimeType = mediaRecorderRef.current?.mimeType || 'audio/webm';
+      const recorder = mediaRecorderRef.current;
+      recorder.addEventListener('stop', () => {
+        const mimeType = recorder.mimeType || audioChunksRef.current[0]?.type || 'audio/webm';
         const blob = new Blob(audioChunksRef.current, { type: mimeType });
-        resolve(blob);
+        resolve(blob.size > 0 ? blob : null);
       }, { once: true });
 
-      mediaRecorderRef.current.stop();
+      recorder.stop();
     });
   }, []);
 
