@@ -483,39 +483,27 @@ export const ChatPage: React.FC = () => {
     const result = await uploadMedia(file, type, name);
 
     if (result) {
-      const localMsg: Message = {
-        id: `local_media_${Date.now()}`,
-        sender_id: user.id,
-        receiver_id: partnerId,
-        content: null,
-        message_type: type,
-        media_url: result.url || result.object_key,
-        media_size: result.size || file.size,
-        media_name: name,
-        reply_to_id: replyingTo?.id || null,
-        is_deleted_sender: false,
-        is_deleted_receiver: false,
-        is_read: false,
-        read_at: null,
-        created_at: new Date().toISOString(),
-        reactions: [],
-      };
-      addLocalMessage(localMsg);
-      setReplyingTo(null);
-
-      if (isConfigured) {
-        await sendMessage(
-          '',
-          type,
-          {
-            url: result.object_key,
-            size: result.size || file.size,
-            name: name,
-          },
-          replyingTo?.id
-        );
+      if (!isConfigured) {
+        toast('Media uploaded, but messaging is not configured; the message was not sent.', 'error');
+        return;
       }
-      toast('Media sent!', 'success');
+
+      const sent = await sendMessage(
+        '',
+        type,
+        {
+          url: result.object_key,
+          size: result.size || file.size,
+          name,
+        },
+        replyingTo?.id
+      );
+      if (sent) {
+        setReplyingTo(null);
+        toast('Media sent!', 'success');
+      } else {
+        toast('Media uploaded, but message delivery failed. Please retry.', 'error');
+      }
     } else if (uploadError) {
       toast(uploadError, 'error');
     }
@@ -529,36 +517,31 @@ export const ChatPage: React.FC = () => {
     if (!blob || isBlocked || !user || !partnerId) return;
 
     toast('Uploading voice note…', 'info');
-    const result = await uploadMedia(blob, 'voice_note', 'voice_note.webm');
+    const extension = blob.type.includes('mp4') ? 'm4a'
+      : blob.type.includes('ogg') ? 'ogg'
+      : blob.type.includes('wav') ? 'wav'
+      : 'webm';
+    const filename = `voice_note.${extension}`;
+    const result = await uploadMedia(blob, 'voice_note', filename);
 
-    if (result) {
-      const localMsg: Message = {
-        id: `local_voice_${Date.now()}`,
-        sender_id: user.id,
-        receiver_id: partnerId,
-        content: null,
-        message_type: 'voice_note',
-        media_url: result.url || result.object_key,
-        media_size: blob.size,
-        media_name: 'voice_note.webm',
-        reply_to_id: null,
-        is_deleted_sender: false,
-        is_deleted_receiver: false,
-        is_read: false,
-        read_at: null,
-        created_at: new Date().toISOString(),
-        reactions: [],
-      };
-      addLocalMessage(localMsg);
+    if (!result) {
+      toast(uploadError || 'Voice note upload failed. Please try again.', 'error');
+      return;
+    }
+    if (!isConfigured) {
+      toast('Voice note uploaded, but messaging is not configured; it was not sent.', 'error');
+      return;
+    }
 
-      if (isConfigured) {
-        await sendMessage('', 'voice_note', {
-          url: result.object_key,
-          size: blob.size,
-          name: 'voice_note.webm',
-        });
-      }
+    const sent = await sendMessage('', 'voice_note', {
+      url: result.object_key,
+      size: blob.size,
+      name: filename,
+    });
+    if (sent) {
       toast('Voice note sent!', 'success');
+    } else {
+      toast('Voice note uploaded, but sending failed. Please retry.', 'error');
     }
   };
 
@@ -1346,6 +1329,11 @@ export const ChatPage: React.FC = () => {
         </div>
       ) : (
         <footer className="p-3 bg-white dark:bg-[#0B0F1A] border-t border-[#E5E7EB] dark:border-[#2A3348] relative">
+          {isPartnerTyping && (
+            <div className="max-w-3xl mx-auto mb-2 px-3 py-1 text-xs font-semibold text-[#4B5563] dark:text-[#9CA3AF]" aria-live="polite">
+              <TypingIndicator className="text-xs" />
+            </div>
+          )}
           {permissionError && (
             <div className="mb-2 text-xs text-rose-500 font-semibold">
               ⚠️ {permissionError}
@@ -1481,7 +1469,10 @@ export const ChatPage: React.FC = () => {
                 type="text"
                 spellCheck="true"
                 value={inputText}
-                onChange={handleInputChange}
+                onChange={(event) => {
+                  handleInputChange(event);
+                  if (event.target.value.trim()) notifyTyping();
+                }}
                 onKeyDown={handleKeyDown}
                 placeholder={isAnonymousSend ? 'Type anonymous message…' : 'Type a message… (Enter to send, Tab to complete)'}
                 className={`w-full px-4 py-2.5 rounded-2xl bg-[#F5F7FA] dark:bg-[#1A2234] border ${
