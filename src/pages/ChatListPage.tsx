@@ -459,7 +459,6 @@ export const ChatListPage: React.FC = () => {
             description: newGroupDesc.trim() || null,
             avatar_url: null,
             created_by: user.id,
-            members_count: 1,
           })
           .select('*')
           .single();
