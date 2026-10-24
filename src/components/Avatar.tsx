@@ -63,15 +63,12 @@ export const Avatar: React.FC<AvatarProps> = ({
 
   return (
     <div className={`relative inline-flex flex-shrink-0 items-center justify-center rounded-full select-none ${className}`}>
-      {avatarUrl ? (
+      {resolvedAvatarUrl && !avatarFailed ? (
         <img
-          src={avatarUrl}
+          src={resolvedAvatarUrl}
           alt={name}
           className={`${sizeClasses[size]} rounded-full object-cover border border-[#E5E7EB] dark:border-[#2A3348]`}
-          onError={(e) => {
-            // If image fails to load, hide image and show initials fallback
-            (e.target as HTMLElement).style.display = 'none';
-          }}
+          onError={() => setAvatarFailed(true)}
         />
       ) : null}
 
