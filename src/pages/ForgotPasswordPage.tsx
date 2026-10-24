@@ -14,8 +14,11 @@ export const ForgotPasswordPage: React.FC = () => {
     setIsSubmitting(true);
     if (isConfigured) {
       await supabase.auth.resetPasswordForEmail(email.trim(), {
-        redirectTo: `${window.location.origin}/login`,
-      }).catch(() => {});
+        redirectTo: `${window.location.origin}/update-password`,
+      }).catch((error) => {
+        // Keep the same success message to avoid leaking whether an account exists.
+        console.warn('Password reset request failed:', error);
+      });
     }
     setIsSubmitting(false);
     // Always show same message to prevent account enumeration
