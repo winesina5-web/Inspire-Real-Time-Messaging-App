@@ -177,12 +177,17 @@ export const ChatListPage: React.FC = () => {
       // Fetch user's contacts
       const { data: contactsData } = await supabase
         .from('contacts')
-        .select('contact_id, profile:contact_id (*)')
+        .select('contact_id, custom_name, profile:contact_id (*)')
         .eq('user_id', user.id);
 
       const loadedContacts = (contactsData || [])
-        .map((c: { profile: unknown }) => c.profile as Profile)
-        .filter(Boolean);
+        .map((contact: { profile: unknown; custom_name?: string | null }) => {
+          const profile = contact.profile as Profile | null;
+          return profile
+            ? { ...profile, display_name: contact.custom_name?.trim() || profile.display_name }
+            : null;
+        })
+        .filter((profile): profile is Profile => Boolean(profile));
       setContacts(loadedContacts);
 
       // Fetch all messages visible to me to aggregate conversations correctly
@@ -404,15 +409,22 @@ export const ChatListPage: React.FC = () => {
 
     try {
       // Each user may create only their own contact row under RLS.
+      const enteredName = window.prompt(
+        'Custom name for this contact (optional):',
+        contactUser.display_name || contactUser.username || ''
+      );
+      const customName = enteredName?.trim() || null;
       const { error } = await supabase.from('contacts').upsert(
-        { user_id: user.id, contact_id: contactUser.id },
-        { onConflict: 'user_id,contact_id', ignoreDuplicates: true }
+        { user_id: user.id, contact_id: contactUser.id, custom_name: customName },
+        { onConflict: 'user_id,contact_id' }
       );
       if (error) throw error;
 
-      setContacts((prev) => prev.some((contact) => contact.id === contactUser.id)
-        ? prev
-        : [...prev, contactUser]);
+      const contactToShow = customName ? { ...contactUser, display_name: customName } : contactUser;
+      setContacts((prev) => {
+        const withoutExisting = prev.filter((contact) => contact.id !== contactUser.id);
+        return [...withoutExisting, contactToShow];
+      });
       toast(`Added @${contactUser.username} to contacts!`, 'success');
       setShowAddModal(false);
       navigate(`/chat/${contactUser.id}`);
