@@ -20,9 +20,24 @@ export const AdminDashboardPage: React.FC = () => {
     const fetchStats = async () => {
       setLoading(true);
       try {
-        const { count: usersCount } = await supabase.from('profiles').select('*', { count: 'exact', head: true });
-        const { count: reportsCount } = await supabase.from('reports').select('*', { count: 'exact', head: true }).eq('status', 'open');
-        const { count: messagesCount } = await supabase.from('messages').select('*', { count: 'exact', head: true });
+        const todayStart = new Date();
+        todayStart.setUTCHours(0, 0, 0, 0);
+        const todayIso = todayStart.toISOString();
+        const [
+          { count: usersCount, error: usersError },
+          { count: reportsCount, error: reportsError },
+          { count: messagesCount, error: messagesError },
+          { count: activeUsersCount, error: activeUsersError },
+        ] = await Promise.all([
+          supabase.from('profiles').select('*', { count: 'exact', head: true }),
+          supabase.from('reports').select('*', { count: 'exact', head: true }).eq('status', 'open'),
+          supabase.from('messages').select('*', { count: 'exact', head: true }).gte('created_at', todayIso),
+          supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('is_online', true),
+        ]);
+        if (usersError) console.warn('Dashboard users count failed:', usersError);
+        if (reportsError) console.warn('Dashboard reports count failed:', reportsError);
+        if (messagesError) console.warn('Dashboard message count failed:', messagesError);
+        if (activeUsersError) console.warn('Dashboard online users count failed:', activeUsersError);
 
         // Sum AI neuron usage today
         const todayUtc = new Date().toISOString().split('T')[0];
@@ -38,6 +53,7 @@ export const AdminDashboardPage: React.FC = () => {
           totalUsers: usersCount ?? 0,
           openReports: reportsCount ?? 0,
           messagesToday: messagesCount ?? 0,
+          activeUsersToday: activeUsersCount ?? 0,
           neuronUsageToday: totalNeurons,
         }));
       } catch (err) {
