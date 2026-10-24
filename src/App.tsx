@@ -7,6 +7,7 @@ import { InstallPrompt } from './components/InstallPrompt';
 import { LoginPage } from './pages/LoginPage';
 import { SignupPage } from './pages/SignupPage';
 import { ForgotPasswordPage } from './pages/ForgotPasswordPage';
+import { UpdatePasswordPage } from './pages/UpdatePasswordPage';
 import { ChooseUsernamePage } from './pages/ChooseUsernamePage';
 import { ChatListPage } from './pages/ChatListPage';
 import { ChatPage } from './pages/ChatPage';
@@ -37,6 +38,7 @@ import { AdminBroadcastPage } from './pages/admin/AdminBroadcastPage';
 import { AdminScheduledBroadcastsPage } from './pages/admin/AdminScheduledBroadcastsPage';
 import { AdminFeatureFlagsPage } from './pages/admin/AdminFeatureFlagsPage';
 import { AdminSettingsPage } from './pages/admin/AdminSettingsPage';
+import { AdminChannelsPage } from './pages/admin/AdminChannelsPage';
 
 // Central Maintenance Screen
 function MaintenanceScreen({ onBypass }: { onBypass?: () => void }) {
@@ -198,6 +200,7 @@ function AppRoutes() {
           </GuestRoute>
         }
       />
+      <Route path="/update-password" element={<UpdatePasswordPage />} />
 
       {/* Onboarding Username Chooser */}
       <Route
@@ -371,6 +374,14 @@ function AppRoutes() {
         element={
           <AdminRoute>
             <AdminAnalyticsPage />
+          </AdminRoute>
+        }
+      />
+      <Route
+        path="/admin/channels"
+        element={
+          <AdminRoute>
+            <AdminChannelsPage />
           </AdminRoute>
         }
       />
