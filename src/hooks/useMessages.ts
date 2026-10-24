@@ -224,6 +224,10 @@ export function useMessages(partnerId: string) {
     });
   }, []);
 
+  const removeLocalMessage = useCallback((messageId: string) => {
+    setMessages((prev) => prev.filter((message) => message.id !== messageId));
+  }, []);
+
   const sendMessage = async (
     content: string,
     messageType: MessageType = 'text',
@@ -249,6 +253,7 @@ export function useMessages(partnerId: string) {
       read_at: null,
       created_at: new Date().toISOString(),
       reactions: [],
+      delivery_status: 'sending',
       reply_to: replyToId ? messages.find((m) => m.id === replyToId) || null : null,
     };
 
@@ -277,7 +282,7 @@ export function useMessages(partnerId: string) {
 
       if (error || !data) {
         console.warn('Failed to insert message into Supabase:', error);
-        setMessages((prev) => prev.filter((m) => m.id !== tempId));
+        setMessages((prev) => prev.map((m) => m.id === tempId ? { ...m, delivery_status: 'failed' } : m));
         return null;
       }
 
@@ -293,7 +298,7 @@ export function useMessages(partnerId: string) {
       return savedMessage;
     } catch (err) {
       console.warn('Exception sending message:', err);
-      setMessages((prev) => prev.filter((m) => m.id !== tempId));
+      setMessages((prev) => prev.map((m) => m.id === tempId ? { ...m, delivery_status: 'failed' } : m));
       return null;
     }
   };
@@ -401,6 +406,7 @@ export function useMessages(partnerId: string) {
     addReaction,
     markAsRead,
     addLocalMessage,
+    removeLocalMessage,
     refreshMessages: loadMessages,
   };
 }
