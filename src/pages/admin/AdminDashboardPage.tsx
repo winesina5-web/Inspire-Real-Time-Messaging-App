@@ -32,7 +32,7 @@ export const AdminDashboardPage: React.FC = () => {
           supabase.from('profiles').select('*', { count: 'exact', head: true }),
           supabase.from('reports').select('*', { count: 'exact', head: true }).eq('status', 'open'),
           supabase.from('messages').select('*', { count: 'exact', head: true }).gte('created_at', todayIso),
-          supabase.from('profiles').select('*', { count: 'exact', head: true }).eq('is_online', true),
+          supabase.from('profiles').select('*', { count: 'exact', head: true }).gte('last_seen', todayIso),
         ]);
         if (usersError) console.warn('Dashboard users count failed:', usersError);
         if (reportsError) console.warn('Dashboard reports count failed:', reportsError);
