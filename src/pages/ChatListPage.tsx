@@ -434,6 +434,36 @@ export const ChatListPage: React.FC = () => {
     }
   };
 
+  const handleRenameContact = async (contact: Profile) => {
+    if (!user) return;
+    const entered = window.prompt('Custom name for this contact:', contact.display_name || contact.username || '');
+    if (entered === null) return;
+    const customName = entered.trim() || null;
+
+    if (isConfigured) {
+      const { error } = await supabase
+        .from('contacts')
+        .update({ custom_name: customName })
+        .eq('user_id', user.id)
+        .eq('contact_id', contact.id);
+      if (error) {
+        toast('Could not save custom contact name.', 'error');
+        console.warn('Rename contact failed:', error);
+        return;
+      }
+    }
+
+    let displayName = customName;
+    if (!displayName && isConfigured) {
+      const { data } = await supabase.from('profiles').select('display_name').eq('id', contact.id).maybeSingle();
+      displayName = data?.display_name || contact.username || 'Contact';
+    }
+    setContacts((prev) => prev.map((item) =>
+      item.id === contact.id ? { ...item, display_name: displayName || contact.username || 'Contact' } : item
+    ));
+    toast(customName ? 'Contact name saved.' : 'Custom name removed.', 'success');
+  };
+
   const totalUnread = useMemo(() => {
     return conversations.reduce((acc, c) => acc + c.unreadCount, 0);
   }, [conversations]);
@@ -990,12 +1020,21 @@ export const ChatListPage: React.FC = () => {
                     </div>
                   </div>
 
-                  <button
-                    onClick={() => navigate(`/chat/${contact.id}`)}
-                    className="px-3 py-1.5 rounded-xl bg-[#0E2A6E] text-white text-xs font-bold hover:bg-[#081B47] active:scale-95 shadow-sm"
-                  >
-                    Message
-                  </button>
+                  <div className="flex items-center space-x-1.5">
+                    <button
+                      onClick={() => handleRenameContact(contact)}
+                      className="px-2.5 py-1.5 rounded-xl border border-gray-200 dark:border-gray-700 text-xs font-bold hover:bg-gray-100 dark:hover:bg-gray-800"
+                      title="Set a custom contact name"
+                    >
+                      Rename
+                    </button>
+                    <button
+                      onClick={() => navigate(`/chat/${contact.id}`)}
+                      className="px-3 py-1.5 rounded-xl bg-[#0E2A6E] text-white text-xs font-bold hover:bg-[#081B47] active:scale-95 shadow-sm"
+                    >
+                      Message
+                    </button>
+                  </div>
                 </div>
               ))}
 
