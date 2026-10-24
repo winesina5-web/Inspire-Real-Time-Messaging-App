@@ -110,6 +110,15 @@ test('verifySupabaseJwt: fails on tampered payload or signature mismatch', async
   assert.equal(resultTampered, null, 'tampered payload must fail signature check');
 });
 
+test('verifySupabaseJwt: rejects tokens without authenticated audience', async () => {
+  const secret = 'correct-supabase-secret-test-key-32';
+  const token = await createTestJwt(
+    { sub: 'usr_no_aud', exp: Math.floor(Date.now() / 1000) + 3600 },
+    secret
+  );
+  assert.equal(await verifySupabaseJwt(`Bearer ${token}`, secret), null);
+});
+
 test('verifySupabaseJwt: accepts valid signed token with authenticated aud', async () => {
   const secret = 'correct-supabase-secret-test-key-32';
   const futureExp = Math.floor(Date.now() / 1000) + 7200;
