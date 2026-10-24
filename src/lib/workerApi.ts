@@ -60,7 +60,7 @@ export const workerApi = {
   async getDownloadUrl(objectKey: string): Promise<string> {
     if (!objectKey) return '';
     if (/^(https?:\/\/|data:)/i.test(objectKey)) return objectKey;
-    const { data, error } = await supabase.storage.from('inspire-media').createSignedUrl(objectKey, 300);
+    const { data, error } = await supabase.storage.from('inspire-media').createSignedUrl(objectKey, 3600);
     if (error || !data?.signedUrl) {
       console.warn('Failed to resolve private media URL:', error?.message || objectKey);
       return '';
