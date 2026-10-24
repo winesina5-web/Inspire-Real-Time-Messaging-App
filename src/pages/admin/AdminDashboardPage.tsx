@@ -6,11 +6,11 @@ import { supabase, isConfigured } from '../../lib/supabaseClient';
 export const AdminDashboardPage: React.FC = () => {
   const navigate = useNavigate();
   const [stats, setStats] = useState({
-    totalUsers: 142,
-    messagesToday: 890,
-    activeUsersToday: 64,
-    openReports: 3,
-    neuronUsageToday: 842, // against 10,000 cap
+    totalUsers: 0,
+    messagesToday: 0,
+    activeUsersToday: 0,
+    openReports: 0,
+    neuronUsageToday: 0,
   });
   const [loading, setLoading] = useState(false);
 
@@ -35,10 +35,10 @@ export const AdminDashboardPage: React.FC = () => {
 
         setStats((prev) => ({
           ...prev,
-          totalUsers: usersCount || prev.totalUsers,
-          openReports: reportsCount || prev.openReports,
-          messagesToday: messagesCount || prev.messagesToday,
-          neuronUsageToday: totalNeurons || prev.neuronUsageToday,
+          totalUsers: usersCount ?? 0,
+          openReports: reportsCount ?? 0,
+          messagesToday: messagesCount ?? 0,
+          neuronUsageToday: totalNeurons,
         }));
       } catch (err) {
         console.warn('Dashboard stats error:', err);
