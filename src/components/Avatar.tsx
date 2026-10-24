@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
+import { workerApi } from '../lib/workerApi';
 import { getAvatarColor } from '../utils/helpers';
 
 interface AvatarProps {
@@ -42,22 +43,36 @@ export const Avatar: React.FC<AvatarProps> = ({
     .join('');
 
   const colors = getAvatarColor(name || 'inspire');
+  const [resolvedAvatarUrl, setResolvedAvatarUrl] = useState('');
+  const [avatarFailed, setAvatarFailed] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    setAvatarFailed(false);
+    if (!avatarUrl) {
+      setResolvedAvatarUrl('');
+      return () => { active = false; };
+    }
+    workerApi.getDownloadUrl(avatarUrl).then((url) => {
+      if (active) setResolvedAvatarUrl(url);
+    }).catch(() => {
+      if (active) setResolvedAvatarUrl('');
+    });
+    return () => { active = false; };
+  }, [avatarUrl]);
 
   return (
     <div className={`relative inline-flex flex-shrink-0 items-center justify-center rounded-full select-none ${className}`}>
-      {avatarUrl ? (
+      {resolvedAvatarUrl && !avatarFailed ? (
         <img
-          src={avatarUrl}
+          src={resolvedAvatarUrl}
           alt={name}
           className={`${sizeClasses[size]} rounded-full object-cover border border-[#E5E7EB] dark:border-[#2A3348]`}
-          onError={(e) => {
-            // If image fails to load, hide image and show initials fallback
-            (e.target as HTMLElement).style.display = 'none';
-          }}
+          onError={() => setAvatarFailed(true)}
         />
       ) : null}
 
-      {!avatarUrl && (
+      {(!resolvedAvatarUrl || avatarFailed) && (
         <div
           style={{ backgroundColor: colors.bg, color: colors.text }}
           className={`${sizeClasses[size]} rounded-full flex items-center justify-center font-bold tracking-tight shadow-sm`}

@@ -60,8 +60,8 @@ export async function verifySupabaseJwt(
       return null;
     }
 
-    // Verify audience if present (Supabase default is 'authenticated')
-    if (payload.aud && payload.aud !== 'authenticated') {
+    // Supabase user access tokens must carry the authenticated audience.
+    if (payload.aud !== 'authenticated') {
       return null;
     }
 

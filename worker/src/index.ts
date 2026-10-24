@@ -1,5 +1,5 @@
-import { Env, handleMediaUpload, handleDownloadUrl, handleMediaStream } from './media';
-import { verifySupabaseJwt, AuthUser } from './auth';
+import { Env } from './env';
+import { verifySupabaseJwt } from './auth';
 import {
   handleSmartReply,
   handleTranslate,
@@ -37,9 +37,7 @@ export function getCorsHeaders(request: Request, env: Env): HeadersInit {
 
   if (origin) {
     if (
-      allAllowed.includes(origin) ||
-      origin.endsWith('.pages.dev') ||
-      origin.endsWith('.run.app')
+      allAllowed.includes(origin)
     ) {
       allowedOrigin = origin;
     }
@@ -122,17 +120,6 @@ export default {
 
     try {
       switch (url.pathname) {
-        // Media routes
-        case '/api/media/upload':
-          response = await handleMediaUpload(request, env, user);
-          break;
-        case '/api/media/download-url':
-          response = await handleDownloadUrl(request, env, user);
-          break;
-        case '/api/media/stream':
-          response = await handleMediaStream(request, env, user);
-          break;
-
         // Core AI routes
         case '/api/ai/smart-reply':
           response = await handleSmartReply(request, env, user);
@@ -585,18 +572,17 @@ export default {
             break;
           }
           response = Response.json({
-            download_url: 'data:text/plain;charset=utf-8,--- Inspire Administrative Compliance Report ---',
-          });
+            error: 'compliance_export_not_configured',
+            message: 'Compliance report generation is not configured yet.',
+          }, { status: 501 });
           break;
         }
 
         case '/api/export/account': {
           response = Response.json({
-            status: 'completed',
-            user_id: user.userId,
-            generated_at: new Date().toISOString(),
-            data_export_url: `https://pub-r2.inspire.app/exports/${user.userId}_data.json`,
-          });
+            error: 'account_export_not_configured',
+            message: 'Account export generation is not configured yet.',
+          }, { status: 501 });
           break;
         }
 

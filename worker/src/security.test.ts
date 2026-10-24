@@ -110,6 +110,15 @@ test('verifySupabaseJwt: fails on tampered payload or signature mismatch', async
   assert.equal(resultTampered, null, 'tampered payload must fail signature check');
 });
 
+test('verifySupabaseJwt: rejects tokens without authenticated audience', async () => {
+  const secret = 'correct-supabase-secret-test-key-32';
+  const token = await createTestJwt(
+    { sub: 'usr_no_aud', exp: Math.floor(Date.now() / 1000) + 3600 },
+    secret
+  );
+  assert.equal(await verifySupabaseJwt(`Bearer ${token}`, secret), null);
+});
+
 test('verifySupabaseJwt: accepts valid signed token with authenticated aud', async () => {
   const secret = 'correct-supabase-secret-test-key-32';
   const futureExp = Math.floor(Date.now() / 1000) + 7200;
@@ -167,4 +176,10 @@ test('getCorsHeaders: never returns wildcard * and respects origin allowlist', (
   });
   const headersUnauth = getCorsHeaders(reqUnauth, mockEnv) as Record<string, string>;
   assert.equal(headersUnauth['Access-Control-Allow-Origin'], undefined, 'must not allow unauthorized origin');
+
+  const reqWildcardPages = new Request('http://localhost:8787/api/test', {
+    headers: { Origin: 'https://attacker.pages.dev' },
+  });
+  const headersWildcardPages = getCorsHeaders(reqWildcardPages, mockEnv) as Record<string, string>;
+  assert.equal(headersWildcardPages['Access-Control-Allow-Origin'], undefined, 'must not trust arbitrary pages.dev subdomains');
 });
