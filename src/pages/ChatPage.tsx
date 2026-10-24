@@ -221,7 +221,17 @@ export const ChatPage: React.FC = () => {
           .maybeSingle();
 
         if (data) {
-          setPartnerProfile(data as Profile);
+          const { data: contactAlias } = await supabase
+            .from('contacts')
+            .select('custom_name')
+            .eq('user_id', user?.id || '')
+            .eq('contact_id', partnerId)
+            .maybeSingle();
+          const profile = data as Profile;
+          setPartnerProfile({
+            ...profile,
+            display_name: contactAlias?.custom_name?.trim() || profile.display_name,
+          });
         }
 
         // Check if either party blocked the other
