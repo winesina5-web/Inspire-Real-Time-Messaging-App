@@ -1,5 +1,5 @@
-import { Env, handleMediaUpload, handleDownloadUrl, handleMediaStream } from './media';
-import { verifySupabaseJwt, AuthUser } from './auth';
+import { Env } from './env';
+import { verifySupabaseJwt } from './auth';
 import {
   handleSmartReply,
   handleTranslate,
@@ -37,9 +37,7 @@ export function getCorsHeaders(request: Request, env: Env): HeadersInit {
 
   if (origin) {
     if (
-      allAllowed.includes(origin) ||
-      origin.endsWith('.pages.dev') ||
-      origin.endsWith('.run.app')
+      allAllowed.includes(origin)
     ) {
       allowedOrigin = origin;
     }
@@ -122,17 +120,6 @@ export default {
 
     try {
       switch (url.pathname) {
-        // Media routes
-        case '/api/media/upload':
-          response = await handleMediaUpload(request, env, user);
-          break;
-        case '/api/media/download-url':
-          response = await handleDownloadUrl(request, env, user);
-          break;
-        case '/api/media/stream':
-          response = await handleMediaStream(request, env, user);
-          break;
-
         // Core AI routes
         case '/api/ai/smart-reply':
           response = await handleSmartReply(request, env, user);
