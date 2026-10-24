@@ -167,4 +167,10 @@ test('getCorsHeaders: never returns wildcard * and respects origin allowlist', (
   });
   const headersUnauth = getCorsHeaders(reqUnauth, mockEnv) as Record<string, string>;
   assert.equal(headersUnauth['Access-Control-Allow-Origin'], undefined, 'must not allow unauthorized origin');
+
+  const reqWildcardPages = new Request('http://localhost:8787/api/test', {
+    headers: { Origin: 'https://attacker.pages.dev' },
+  });
+  const headersWildcardPages = getCorsHeaders(reqWildcardPages, mockEnv) as Record<string, string>;
+  assert.equal(headersWildcardPages['Access-Control-Allow-Origin'], undefined, 'must not trust arbitrary pages.dev subdomains');
 });
