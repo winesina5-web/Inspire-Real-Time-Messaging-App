@@ -37,86 +37,42 @@ export const workerApi = {
    * Fails closed: does not silently masquerade storage failures as successful cloud uploads.
    */
   async uploadMedia(file: File | Blob, messageType: string, filename?: string): Promise<UploadMediaResponse> {
-    const token = await getAuthToken();
-    const formData = new FormData();
-    formData.append('file', file, filename || (file instanceof File ? file.name : 'attachment.bin'));
-    formData.append('message_type', messageType);
+    const { data: { user }, error: userError } = await supabase.auth.getUser();
+    if (userError || !user) throw new Error('Sign in before uploading media.');
 
-    if (WORKER_BASE) {
-      const res = await fetch(`${WORKER_BASE}/api/media/upload`, {
-        method: 'POST',
-        headers: {
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: formData,
-      });
+    const limits: Record<string, number> = {
+      image: 10 * 1024 * 1024, video: 50 * 1024 * 1024, audio: 20 * 1024 * 1024,
+      voice_note: 10 * 1024 * 1024, avatar: 5 * 1024 * 1024, file: 25 * 1024 * 1024,
+    };
+    const maxBytes = limits[messageType] ?? limits.file;
+    if (file.size > maxBytes) throw new Error(`File exceeds the ${Math.round(maxBytes / (1024 * 1024))} MB limit for ${messageType}.`);
 
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.error || `Media upload failed with status ${res.status}`);
-      }
-
-      return await res.json();
-    }
-
-    // In development without a deployed worker, alert developer explicitly rather than silently faking in production
-    if (import.meta.env.DEV) {
-      console.info('Development note: VITE_WORKER_API_URL not configured. Using local ephemeral preview URL for testing.');
-      return new Promise((resolve) => {
-        const reader = new FileReader();
-        reader.onload = () => {
-          const ext = file.type.split('/')[1] || 'bin';
-          const key = `dev_preview/${Date.now()}.${ext}`;
-          resolve({
-            object_key: key,
-            url: reader.result as string,
-            size: file.size,
-            mime_type: file.type,
-          });
-        };
-        reader.readAsDataURL(file);
-      });
-    }
-
-    throw new Error('Cloudflare Worker media endpoint is not configured (VITE_WORKER_API_URL missing).');
+    const originalName = filename || (file instanceof File ? file.name : 'attachment.bin');
+    const extension = originalName.includes('.')
+      ? (originalName.split('.').pop() || 'bin').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 10) || 'bin'
+      : 'bin';
+    const objectKey = messageType === 'avatar'
+      ? `${user.id}/avatar.${extension}`
+      : `${user.id}/${crypto.randomUUID()}.${extension}`;
+    const contentType = file.type || 'application/octet-stream';
+    const { data, error } = await supabase.storage.from('inspire-media').upload(objectKey, file, {
+      contentType, cacheControl: '3600', upsert: messageType === 'avatar',
+    });
+    if (error || !data?.path) throw new Error(error?.message || 'Supabase Storage upload failed.');
+    return { object_key: data.path, size: file.size, mime_type: contentType, message_type: messageType };
   },
 
-  /**
-   * Resolves a short-lived authorized download URL for private R2 media.
-   */
+  /** Resolves a short-lived signed URL from the private Supabase Storage bucket. */
   async getDownloadUrl(objectKey: string): Promise<string> {
     if (!objectKey) return '';
-    if (objectKey.startsWith('http://') || objectKey.startsWith('https://') || objectKey.startsWith('data:')) {
-      return objectKey;
+    if (/^(https?:\/\/|data:)/i.test(objectKey)) return objectKey;
+    const { data, error } = await supabase.storage.from('inspire-media').createSignedUrl(objectKey, 300);
+    if (error || !data?.signedUrl) {
+      console.warn('Failed to resolve private media URL:', error?.message || objectKey);
+      return '';
     }
-
-    if (WORKER_BASE) {
-      const token = await getAuthToken();
-      try {
-        const res = await fetch(`${WORKER_BASE}/api/media/download-url`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          },
-          body: JSON.stringify({ object_key: objectKey }),
-        });
-
-        if (res.ok) {
-          const data: DownloadUrlResponse = await res.json();
-          return data.download_url;
-        } else if (res.status === 403) {
-          console.warn(`Access forbidden to media object: ${objectKey}`);
-          return '';
-        }
-      } catch (err) {
-        console.warn('Failed to resolve signed download URL:', err);
-      }
-    }
-
-    return '';
+    return data.signedUrl;
   },
-
   // Feature 8: Rich Link Previews with SSRF Protection
   async getLinkPreview(url: string): Promise<LinkPreviewData | null> {
     if (WORKER_BASE) {
@@ -399,24 +355,22 @@ export const workerApi = {
   },
 
   async transcribe(objectKey: string): Promise<string> {
-    if (WORKER_BASE) {
-      const token = await getAuthToken();
-      const res = await fetch(`${WORKER_BASE}/api/ai/transcribe`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({ object_key: objectKey }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        return data.transcript || '';
-      }
+    if (!WORKER_BASE) throw new Error('Worker AI is not configured.');
+    const { data: audio, error: downloadError } = await supabase.storage.from('inspire-media').download(objectKey);
+    if (downloadError || !audio) throw new Error(downloadError?.message || 'Could not read audio from private storage.');
+    const token = await getAuthToken();
+    const formData = new FormData();
+    formData.append('file', audio, objectKey.split('/').pop() || 'audio.bin');
+    const response = await fetch(`${WORKER_BASE}/api/ai/transcribe`, {
+      method: 'POST', headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: formData,
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.details || error.error || 'Audio transcription service unavailable.');
     }
-    throw new Error('Audio transcription service unavailable.');
+    const data = await response.json();
+    return data.transcript || '';
   },
-
   async emojiSuggest(messageText: string): Promise<string[]> {
     if (WORKER_BASE) {
       const token = await getAuthToken();
@@ -515,24 +469,22 @@ export const workerApi = {
   },
 
   async autoCaption(objectKey: string): Promise<string> {
-    if (WORKER_BASE) {
-      const token = await getAuthToken();
-      const res = await fetch(`${WORKER_BASE}/api/ai/auto-caption`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({ object_key: objectKey }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        return data.vtt || data.transcript || '';
-      }
+    if (!WORKER_BASE) return '';
+    const { data: media, error: downloadError } = await supabase.storage.from('inspire-media').download(objectKey);
+    if (downloadError || !media) throw new Error(downloadError?.message || 'Could not read media from private storage.');
+    const token = await getAuthToken();
+    const formData = new FormData();
+    formData.append('file', media, objectKey.split('/').pop() || 'media.bin');
+    const response = await fetch(`${WORKER_BASE}/api/ai/auto-caption`, {
+      method: 'POST', headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) }, body: formData,
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({}));
+      throw new Error(error.details || error.error || 'Automatic captioning is unavailable.');
     }
-    return '';
+    const data = await response.json();
+    return data.vtt || data.transcript || '';
   },
-
   async suggestStickers(messageText: string, availableShortcodes: string[]): Promise<string[]> {
     if (WORKER_BASE) {
       const token = await getAuthToken();
