@@ -572,18 +572,17 @@ export default {
             break;
           }
           response = Response.json({
-            download_url: 'data:text/plain;charset=utf-8,--- Inspire Administrative Compliance Report ---',
-          });
+            error: 'compliance_export_not_configured',
+            message: 'Compliance report generation is not configured yet.',
+          }, { status: 501 });
           break;
         }
 
         case '/api/export/account': {
           response = Response.json({
-            status: 'completed',
-            user_id: user.userId,
-            generated_at: new Date().toISOString(),
-            data_export_url: `https://pub-r2.inspire.app/exports/${user.userId}_data.json`,
-          });
+            error: 'account_export_not_configured',
+            message: 'Account export generation is not configured yet.',
+          }, { status: 501 });
           break;
         }
 
