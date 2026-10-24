@@ -1,4 +1,4 @@
-import { Env } from './media';
+import { Env } from './env';
 import { AuthUser } from './auth';
 
 /**
@@ -261,34 +261,38 @@ export async function handleModerate(request: Request, env: Env, user: AuthUser)
 }
 
 export async function handleTranscribe(request: Request, env: Env, user: AuthUser): Promise<Response> {
-  const body = (await request.json().catch(() => ({}))) as { object_key?: string };
-  const objectKey = body.object_key;
-  if (!objectKey) return Response.json({ error: 'Missing object_key' }, { status: 400 });
-
   if (!env.AI || typeof env.AI.run !== 'function') {
     return Response.json({ error: 'Workers AI binding unavailable' }, { status: 503 });
   }
 
+  let file: File | null = null;
+  try {
+    const formData = await request.formData();
+    const candidate = formData.get('file');
+    if (candidate instanceof File) file = candidate;
+  } catch {
+    return Response.json({ error: 'Expected multipart/form-data with an audio file' }, { status: 400 });
+  }
+  if (!file) return Response.json({ error: 'Missing audio file' }, { status: 400 });
+  if (file.size > 20 * 1024 * 1024) {
+    return Response.json({ error: 'Audio file exceeds the 20 MB limit' }, { status: 413 });
+  }
+  if (file.type && !file.type.startsWith('audio/') && !['video/mp4', 'video/webm', 'application/octet-stream'].includes(file.type)) {
+    return Response.json({ error: 'Unsupported audio media type' }, { status: 415 });
+  }
+
   const budgetOk = await checkAiBudget(env);
   if (!budgetOk) return Response.json({ error: 'ai_budget_exceeded' }, { status: 429 });
-
   const modelId = '@cf/openai/whisper-large-v3-turbo';
   try {
-    const obj = await env.MY_BUCKET.get(objectKey);
-    if (!obj) return Response.json({ error: 'Audio object not found' }, { status: 404 });
-
-    const audioBytes = await obj.arrayBuffer();
-    const res = await env.AI.run(modelId, {
-      audio: [...new Uint8Array(audioBytes)],
-    });
-
+    const audioBytes = await file.arrayBuffer();
+    const res = await env.AI.run(modelId, { audio: [...new Uint8Array(audioBytes)] });
     await logAiUsage(env, user, 'transcribe', modelId, 23.3);
     return Response.json({ transcript: res.text || 'Transcription complete.' });
   } catch (err) {
     return handleAiError(err);
   }
 }
-
 export async function handleEmojiSuggest(request: Request, env: Env, user: AuthUser): Promise<Response> {
   const body = (await request.json().catch(() => ({}))) as { message_text?: string; mode?: string; available_sticker_shortcodes?: string[] };
   const text = (body.message_text || '').trim();
