@@ -19,11 +19,6 @@ export interface UploadMediaResponse {
   message_type?: string;
 }
 
-export interface DownloadUrlResponse {
-  download_url: string;
-  expires_in?: number;
-}
-
 export interface LinkPreviewData {
   url: string;
   title: string;
@@ -33,8 +28,7 @@ export interface LinkPreviewData {
 
 export const workerApi = {
   /**
-   * Uploads media via Cloudflare Worker native R2 binding.
-   * Fails closed: does not silently masquerade storage failures as successful cloud uploads.
+   * Uploads media to the authenticated user's private Supabase Storage folder.
    */
   async uploadMedia(file: File | Blob, messageType: string, filename?: string): Promise<UploadMediaResponse> {
     const { data: { user }, error: userError } = await supabase.auth.getUser();
