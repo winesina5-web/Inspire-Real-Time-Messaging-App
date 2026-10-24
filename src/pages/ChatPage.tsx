@@ -64,6 +64,7 @@ export const ChatPage: React.FC = () => {
     addReaction,
     markAsRead,
     addLocalMessage,
+    removeLocalMessage,
   } = useMessages(partnerId || '');
 
   const { isOnline } = usePresence();
@@ -416,7 +417,10 @@ export const ChatPage: React.FC = () => {
       return;
     }
 
-    await sendMessage(text, 'text', undefined, replyId);
+    const sent = await sendMessage(text, 'text', undefined, replyId);
+    if (!sent) {
+      toast('Message could not be sent. Tap Retry on the message when the connection is back.', 'error');
+    }
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -1149,8 +1153,17 @@ export const ChatPage: React.FC = () => {
                     onRsvpEvent={(eventId, resp) => {
                       toast(`RSVP updated: ${resp.toUpperCase()}`, 'success');
                     }}
-                    onRetrySend={(m) => {
+                    onRetrySend={async (m) => {
+                      if (!user || !partnerId) return;
                       toast('Retrying send…', 'info');
+                      removeLocalMessage(m.id);
+                      const retried = await sendMessage(
+                        m.content || '',
+                        m.message_type,
+                        m.media_url ? { url: m.media_url, size: m.media_size || undefined, name: m.media_name || undefined } : undefined,
+                        m.reply_to_id || undefined
+                      );
+                      if (!retried) toast('Retry failed. Check your connection and try again.', 'error');
                     }}
                   />
                 </div>
