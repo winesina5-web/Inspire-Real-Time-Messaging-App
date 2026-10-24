@@ -1,0 +1,8 @@
+{
+  "name": "Inspire — Real-Time Messaging App",
+  "description": "WhatsApp-style real-time messaging application with instant delivery, read receipts, rich media, smart AI features, and admin moderation.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

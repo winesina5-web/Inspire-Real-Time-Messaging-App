@@ -1,0 +1,19 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "inspire-worker",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-22",
+  "ai": {
+    "binding": "AI"
+  },
+  "r2_buckets": [
+    {
+      "binding": "MY_BUCKET",
+      "bucket_name": "inspire-media"
+    }
+  ],
+  "vars": {
+    "ACCOUNT_ID": "<cloudflare-account-id>",
+    "BUCKET_NAME": "inspire-media"
+  }
+}

@@ -1,0 +1,144 @@
+@import "tailwindcss";
+
+:root {
+  --color-primary: #0E2A6E;
+  --color-primary-dark: #081B47;
+  --color-accent: #FFD700;
+  --color-bg: #FFFFFF;
+  --color-surface: #FFFFFF;
+  --color-input-bg: #F5F7FA;
+  --color-text: #000000;
+  --color-text-muted: #4B5563;
+  --color-border: #E5E7EB;
+  --color-success: #16A34A;
+  --color-danger: #DC2626;
+  --color-on-primary: #FFFFFF;
+  --color-on-accent: #1A1A2E;
+  --chat-sent-bg: #0E2A6E;
+  --chat-sent-text: #FFFFFF;
+  --chat-received-bg: #FFFFFF;
+  --chat-received-text: #000000;
+}
+
+[data-theme="dark"],
+.dark {
+  --color-primary: #3D6FE0;
+  --color-primary-dark: #1A4FBA;
+  --color-accent: #FFD700;
+  --color-bg: #0B0F1A;
+  --color-surface: #161B2B;
+  --color-input-bg: #1A2234;
+  --color-text: #F5F7FA;
+  --color-text-muted: #9CA3AF;
+  --color-border: #2A3348;
+  --color-success: #22C55E;
+  --color-danger: #EF4444;
+  --color-on-primary: #FFFFFF;
+  --color-on-accent: #1A1A2E;
+  --chat-sent-bg: #254BA8;
+  --chat-sent-text: #FFFFFF;
+  --chat-received-bg: #161B2B;
+  --chat-received-text: #F5F7FA;
+}
+
+/* Feature 139: Custom App Accent Themes */
+:root[data-accent-theme="ocean"] {
+  --color-primary: #0D7A8A;
+  --color-primary-dark: #095F6B;
+  --chat-sent-bg: #0D7A8A;
+}
+:root[data-accent-theme="sunset"] {
+  --color-primary: #C2510F;
+  --color-primary-dark: #9A3D08;
+  --chat-sent-bg: #C2510F;
+}
+:root[data-accent-theme="forest"] {
+  --color-primary: #1A7A3C;
+  --color-primary-dark: #125C2C;
+  --chat-sent-bg: #1A7A3C;
+}
+:root[data-accent-theme="rose"] {
+  --color-primary: #B5286A;
+  --color-primary-dark: #8E1E52;
+  --chat-sent-bg: #B5286A;
+}
+
+[data-theme="dark"][data-accent-theme="ocean"],
+.dark[data-accent-theme="ocean"] {
+  --color-primary: #22B2C7;
+  --color-primary-dark: #0D7A8A;
+  --chat-sent-bg: #116875;
+}
+[data-theme="dark"][data-accent-theme="sunset"],
+.dark[data-accent-theme="sunset"] {
+  --color-primary: #EA6C28;
+  --color-primary-dark: #C2510F;
+  --chat-sent-bg: #9E3F0B;
+}
+[data-theme="dark"][data-accent-theme="forest"],
+.dark[data-accent-theme="forest"] {
+  --color-primary: #2ECC71;
+  --color-primary-dark: #1A7A3C;
+  --chat-sent-bg: #155B2E;
+}
+[data-theme="dark"][data-accent-theme="rose"],
+.dark[data-accent-theme="rose"] {
+  --color-primary: #E84393;
+  --color-primary-dark: #B5286A;
+  --chat-sent-bg: #8B1B4F;
+}
+
+body {
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  background-color: var(--color-bg);
+  color: var(--color-text);
+  margin: 0;
+  padding: 0;
+  min-height: 100vh;
+  min-height: 100dvh;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(14, 42, 110, 0.2);
+  border-radius: 9999px;
+}
+[data-theme="dark"] ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+/* Subtle animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideUp {
+  from { opacity: 0; transform: translateY(16px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes bounceSlow {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-slide-up {
+  animation: slideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+.animate-bounce-slow {
+  animation: bounceSlow 1.4s infinite ease-in-out;
+}
