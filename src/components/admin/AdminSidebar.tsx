@@ -14,6 +14,7 @@ export const AdminSidebar: React.FC<{ children: React.ReactNode }> = ({ children
     { label: 'Moderation Rules', to: '/admin/moderation-rules', icon: '🛡️' },
     { label: 'Support Helpdesk', to: '/admin/support', icon: '🎧' },
     { label: 'Chat Inspector', to: '/admin/chats/usr_jordan', icon: '💬' },
+    { label: 'Channels', to: '/admin/channels', icon: '📣' },
     { label: 'Analytics', to: '/admin/analytics', icon: '📈' },
     { label: 'Broadcast', to: '/admin/broadcast', icon: '📢' },
     { label: 'User Appeals', to: '/admin/appeals', icon: '⚖️' },
