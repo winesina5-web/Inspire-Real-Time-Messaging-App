@@ -2,6 +2,14 @@
 -- User-facing tables get owner/participant policies; internal caches and queues
 -- remain available only to service-role code (and admins for read-only support).
 
+
+-- Bot definitions contain webhook URLs and token hashes; keep all direct
+-- browser access restricted to platform administrators.
+DROP POLICY IF EXISTS chat_bots_admin_all ON public.chat_bots;
+CREATE POLICY chat_bots_admin_all ON public.chat_bots
+FOR ALL TO authenticated
+USING (public.is_admin()) WITH CHECK (public.is_admin());
+
 -- User-owned AI personas.
 DROP POLICY IF EXISTS ai_personas_owner_all ON public.ai_personas;
 CREATE POLICY ai_personas_owner_all ON public.ai_personas
