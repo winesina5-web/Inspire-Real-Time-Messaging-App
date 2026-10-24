@@ -403,19 +403,22 @@ export const ChatListPage: React.FC = () => {
     }
 
     try {
-      // Mutual insert A->B and B->A per 05_Backend_Schema
-      await supabase.from('contacts').insert([
+      // Each user may create only their own contact row under RLS.
+      const { error } = await supabase.from('contacts').upsert(
         { user_id: user.id, contact_id: contactUser.id },
-        { user_id: contactUser.id, contact_id: user.id },
-      ]);
+        { onConflict: 'user_id,contact_id', ignoreDuplicates: true }
+      );
+      if (error) throw error;
 
-      setContacts((prev) => [...prev, contactUser]);
+      setContacts((prev) => prev.some((contact) => contact.id === contactUser.id)
+        ? prev
+        : [...prev, contactUser]);
       toast(`Added @${contactUser.username} to contacts!`, 'success');
       setShowAddModal(false);
       navigate(`/chat/${contactUser.id}`);
     } catch (err) {
       console.warn('Add contact error:', err);
-      toast('Failed to add contact', 'error');
+      toast(err instanceof Error ? err.message : 'Failed to add contact', 'error');
     }
   };
 
@@ -443,9 +446,55 @@ export const ChatListPage: React.FC = () => {
     }
   };
 
-  const handleCreateGroup = (e: React.FormEvent) => {
+  const handleCreateGroup = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newGroupName.trim() || !user) return;
+
+    if (isConfigured) {
+      try {
+        const { data: createdGroup, error: groupError } = await supabase
+          .from('groups')
+          .insert({
+            name: newGroupName.trim(),
+            description: newGroupDesc.trim() || null,
+            avatar_url: null,
+            created_by: user.id,
+            members_count: 1,
+          })
+          .select('*')
+          .single();
+
+        if (groupError || !createdGroup) {
+          console.warn('Group creation failed:', groupError);
+          toast(groupError?.message || 'Could not create group. Please try again.', 'error');
+          return;
+        }
+
+        const { error: memberError } = await supabase.from('group_members').insert({
+          group_id: createdGroup.id,
+          user_id: user.id,
+          role: 'admin',
+        });
+        if (memberError) {
+          console.warn('Group membership creation failed:', memberError);
+          await supabase.from('groups').delete().eq('id', createdGroup.id);
+          toast('Group was created but membership could not be saved. Please try again.', 'error');
+          return;
+        }
+
+        setShowCreateGroupModal(false);
+        setNewGroupName('');
+        setNewGroupDesc('');
+        toast(`Group "${createdGroup.name}" created!`, 'success');
+        navigate(`/group/${createdGroup.id}`);
+        return;
+      } catch (err) {
+        console.warn('Group creation exception:', err);
+        toast('Could not create group. Please try again.', 'error');
+        return;
+      }
+    }
+
     const newGrp: Group = {
       id: `grp_${Date.now()}`,
       name: newGroupName.trim(),
