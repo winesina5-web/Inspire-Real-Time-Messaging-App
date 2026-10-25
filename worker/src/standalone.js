@@ -103,7 +103,7 @@ export default {
           const behavior = String(body.behavior || '').trim().slice(0, 2000);
           const scenario = String(body.scenario || '').trim().slice(0, 2000);
           const speakingStyle = String(body.speaking_style || 'Natural, expressive, concise').trim().slice(0, 500);
-          const language = String(body.language || 'Match the user's language').trim().slice(0, 80);
+          const language = String(body.language || "Match the user's language").trim().slice(0, 80);
           const currentMessage = String(body.message || '').trim().slice(0, 3000);
           const sampleDialogue = String(body.sample_dialogue || '').trim().slice(0, 1000);
           const groupMode = body.group_mode === true;
