@@ -21,7 +21,7 @@ export const CallModal: React.FC<CallModalProps> = ({ callId, partner, type, isC
   const [isVideoOff, setIsVideoOff] = useState(type === 'voice');
   const [callStatus, setCallStatus] = useState<'connecting' | 'connected' | 'ended' | 'error'>('connecting');
   const [errorMessage, setErrorMessage] = useState('');
-  const [hasTurnRelay, setHasTurnRelay] = useState(false);
+  const hasTurnRelayRef = useRef(false);
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -127,7 +127,7 @@ export const CallModal: React.FC<CallModalProps> = ({ callId, partner, type, isC
         if (localVideoRef.current) localVideoRef.current.srcObject = stream;
 
         const credentials = await workerApi.getTurnCredentials();
-        setHasTurnRelay(Boolean(credentials.turnConfigured));
+        hasTurnRelayRef.current = Boolean(credentials.turnConfigured);
         const pc = new RTCPeerConnection({ iceServers: credentials.iceServers, iceCandidatePoolSize: 2 });
         peerConnectionRef.current = pc;
         stream.getTracks().forEach((track) => pc.addTrack(track, stream));
@@ -179,7 +179,7 @@ export const CallModal: React.FC<CallModalProps> = ({ callId, partner, type, isC
               if (!disconnectTimer) disconnectTimer = setTimeout(() => {
                 if (mounted && pc.connectionState !== 'connected') {
                   setCallStatus('error');
-                  setErrorMessage(hasTurnRelay ? 'Could not connect media. Check network permissions and try again.' : 'This network needs a TURN relay. Configure TURN_KEY_ID and TURN_API_TOKEN on the inspire-worker Worker, then retry.');
+                  setErrorMessage(hasTurnRelayRef.current ? 'Could not connect media. Check network permissions and try again.' : 'This network needs a TURN relay. Configure TURN_KEY_ID and TURN_API_TOKEN on the inspire-worker Worker, then retry.');
                 }
                 disconnectTimer = null;
               }, 12000);
