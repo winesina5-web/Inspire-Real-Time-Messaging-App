@@ -148,6 +148,9 @@ export const CallModal: React.FC<CallModalProps> = ({ callId, partner, type, isC
             if (status !== 'SUBSCRIBED' || !mounted) return;
             const { data, error } = await supabase.from('call_signals').select('*').eq('call_id', callId).order('created_at', { ascending: true });
             if (!error && data) {
+              if (isCaller && data.some((signal) => signal.event_type === 'offer' && signal.sender_id === user.id)) {
+                offerSentRef.current = true;
+              }
               for (const signal of data) await processSignal(signal);
             }
             if (isCaller && !offerSentRef.current && !endedRef.current && pc.signalingState === 'stable') {
