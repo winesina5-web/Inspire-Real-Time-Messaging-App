@@ -150,9 +150,10 @@ export const SecretChatsPage: React.FC = () => {
         ) : (
           <div className="space-y-4">
             <div className="p-3 rounded-2xl border border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 text-xs text-amber-900 dark:text-amber-100">
-              **Privacy note:** PIN is hashed and kept on this device. This is an app-level lock and a private contact list, not end-to-end encrypted storage; messages still live in your normal Inspire chats.
+              <strong>Privacy note:</strong> PIN is hashed and kept on this device. This is an app-level lock and a private contact list, not end-to-end encrypted storage; messages still live in your normal Inspire chats.
             </div>
             <div className="flex items-center justify-between"><h2 className="font-black">Your secret chat list</h2><button onClick={resetPin} className="text-xs text-rose-500 font-bold">Reset PIN</button></div>
+            {errorMsg && <p role="status" className="text-xs text-rose-500">{errorMsg}</p>}
             {loading ? <p className="text-sm text-gray-500 py-8 text-center">Loading contacts…</p> :
               !isConfigured ? <p className="text-sm text-gray-500">Connect Supabase to select real contacts.</p> :
               contacts.length === 0 ? <p className="text-sm text-gray-500 py-8 text-center">Pehle Chats mein contacts add karein.</p> :
