@@ -80,6 +80,7 @@ export const ChatPage: React.FC = () => {
   const {
     isRecording,
     recordingDuration,
+    recordingWaveform,
     startRecording,
     stopRecording,
     cancelRecording,
@@ -1407,7 +1408,7 @@ export const ChatPage: React.FC = () => {
             <span className="text-sm font-extrabold tracking-wider">
               {formatDuration(recordingDuration)}
             </span>
-            <span className="text-xs text-blue-200">Recording voice note…</span>
+            <span className="text-xs text-white/75">Recording…</span><div className="flex h-8 items-center gap-[2px] min-w-0 flex-1 mx-2" aria-label="Live microphone waveform">{recordingWaveform.map((level, index) => <span key={index} className="w-[3px] rounded-full bg-[#FFD700] transition-all duration-75" style={{ height: `${Math.max(3, level * 0.28)}px` }} />)}</div>
           </div>
           <div className="flex items-center space-x-2">
             <button
