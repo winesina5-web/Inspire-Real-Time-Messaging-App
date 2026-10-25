@@ -202,9 +202,22 @@ export const ChatListPage: React.FC = () => {
           .map((row: any) => {
             const group = Array.isArray(row.group) ? row.group[0] : row.group;
             if (!group) return null;
-            return { ...group, role: row.role, members_count: group.max_members || 1 } as Group;
+            return { ...group, role: row.role, members_count: 1 } as Group;
           })
           .filter((group: Group | null): group is Group => Boolean(group));
+        if (realGroups.length) {
+          const groupIds = realGroups.map((group) => group.id);
+          const { data: memberRows, error: memberCountError } = await supabase
+            .from('group_members')
+            .select('group_id')
+            .in('group_id', groupIds);
+          if (memberCountError) console.warn('Load group member counts failed:', memberCountError);
+          const counts = new Map<string, number>();
+          (memberRows || []).forEach((row: { group_id: string }) => {
+            counts.set(row.group_id, (counts.get(row.group_id) || 0) + 1);
+          });
+          realGroups.forEach((group) => { group.members_count = counts.get(group.id) || 1; });
+        }
         setGroups(realGroups);
       }
 
