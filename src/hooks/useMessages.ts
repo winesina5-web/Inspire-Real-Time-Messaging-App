@@ -191,9 +191,23 @@ export function useMessages(partnerId: string) {
         },
         (payload) => {
           const updated = payload.new as Message;
-          setMessages((prev) =>
-            prev.map((m) => (m.id === updated.id ? { ...m, ...updated } : m))
-          );
+          const isThisChat =
+            (updated.sender_id === user.id && updated.receiver_id === partnerId) ||
+            (updated.sender_id === partnerId && updated.receiver_id === user.id);
+          if (!isThisChat) return;
+          const now = Date.now();
+          const isReleased = !updated.scheduled_for || Date.parse(updated.scheduled_for) <= now;
+          const isNotExpired = !updated.expires_at || Date.parse(updated.expires_at) > now;
+          if (!isReleased || !isNotExpired) return;
+          setMessages((prev) => {
+            const existingIndex = prev.findIndex((m) => m.id === updated.id);
+            if (existingIndex >= 0) {
+              return prev.map((m, index) => index === existingIndex ? { ...m, ...updated } : m);
+            }
+            return [...prev, { ...updated, reactions: [] }].sort(
+              (a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+            );
+          });
         }
       )
       .on(
