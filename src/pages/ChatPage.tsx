@@ -1619,7 +1619,7 @@ export const ChatPage: React.FC = () => {
               <button type="button" onClick={() => setShowContactProfile(false)} aria-label="Close profile" className="p-1 rounded-full hover:bg-white/10"><X size={18} /></button>
             </div>
             <div className="p-5 text-center">
-              <Avatar name={partnerProfile.display_name || partnerProfile.username} avatarUrl={partnerProfile.avatar_url || ''} size="lg" />
+              <Avatar name={partnerProfile.display_name || partnerProfile.username || 'Contact'} avatarUrl={partnerProfile.avatar_url || ''} size="lg" />
               <h4 className="mt-3 text-lg font-bold">{partnerProfile.display_name}</h4>
               <p className="text-sm text-gray-500 dark:text-gray-400">@{partnerProfile.username}</p>
               {partnerProfile.bio && <p className="mt-2 text-sm">{partnerProfile.bio}</p>}
