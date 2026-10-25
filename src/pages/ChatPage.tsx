@@ -65,6 +65,9 @@ export const ChatPage: React.FC = () => {
     markAsRead,
     addLocalMessage,
     removeLocalMessage,
+    loadOlderMessages,
+    isLoadingOlder,
+    hasMoreMessages,
   } = useMessages(partnerId || '');
 
   const { isOnline } = usePresence();
@@ -1149,7 +1152,15 @@ export const ChatPage: React.FC = () => {
             </p>
           </div>
         ) : (
-          messages.map((msg, index) => {
+          <>
+          {hasMoreMessages && (
+            <div className="flex justify-center py-2">
+              <button type="button" onClick={() => void loadOlderMessages()} disabled={isLoadingOlder} className="rounded-full border border-gray-200 dark:border-gray-700 bg-white/80 dark:bg-black/30 px-4 py-2 text-xs font-bold text-gray-600 dark:text-gray-200 disabled:opacity-50 hover:bg-white dark:hover:bg-black/50 transition-colors">
+                {isLoadingOlder ? 'Loading older messages…' : 'Load older messages'}
+              </button>
+            </div>
+          )}
+          {messages.map((msg, index) => {
             const isHighlighted = matchingMessageIds.includes(msg.id);
             const showDateSeparator =
               index === 0 ||
@@ -1216,7 +1227,8 @@ export const ChatPage: React.FC = () => {
                 </div>
               </React.Fragment>
             );
-          })
+          })}
+          </>
         )}
         <div ref={messagesEndRef} />
 
