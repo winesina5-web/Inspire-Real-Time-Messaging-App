@@ -11,16 +11,18 @@ export const VoiceNotePlayer: React.FC<VoiceNotePlayerProps> = ({ audioUrl, isSe
   const [duration, setDuration] = useState(0);
   const [currentTime, setCurrentTime] = useState(0);
   const [loadError, setLoadError] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
     const audio = new Audio(audioUrl);
     audioRef.current = audio;
 
+    setLoadError(false);
+    setIsLoading(true);
     const onLoadedMetadata = () => {
-      if (audio.duration && !isNaN(audio.duration)) {
-        setDuration(audio.duration);
-      }
+      if (audio.duration && !isNaN(audio.duration)) setDuration(audio.duration);
+      setIsLoading(false);
     };
 
     const onTimeUpdate = () => {
@@ -34,6 +36,7 @@ export const VoiceNotePlayer: React.FC<VoiceNotePlayerProps> = ({ audioUrl, isSe
 
     const onError = () => {
       setLoadError(true);
+      setIsLoading(false);
       setIsPlaying(false);
     };
 
@@ -99,7 +102,7 @@ export const VoiceNotePlayer: React.FC<VoiceNotePlayerProps> = ({ audioUrl, isSe
         )}
       </button>
 
-      <div className="flex-1 flex flex-col justify-center space-y-1">
+      <div className="flex-1 flex flex-col justify-center space-y-1 min-w-0">
         <div className="relative flex items-center h-5 w-full">
           {/* Waveform visual bars */}
           <div className="absolute inset-0 flex items-center justify-between pointer-events-none opacity-85">
@@ -133,6 +136,8 @@ export const VoiceNotePlayer: React.FC<VoiceNotePlayerProps> = ({ audioUrl, isSe
           />
         </div>
 
+        {loadError && <span role="status" className="text-[10px] font-semibold text-rose-500">Audio unavailable — sender may need to resend it.</span>}
+        {!loadError && isLoading && <span className="text-[10px] opacity-70">Loading audio…</span>}
         <div className="flex justify-between text-[11px] font-bold">
           <span className={isSentByMe ? 'text-white/90' : 'text-gray-700 dark:text-gray-300'}>
             {formatDuration(isPlaying ? currentTime : (duration || 0))}
