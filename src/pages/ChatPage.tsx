@@ -49,6 +49,7 @@ import { workerApi } from '../lib/workerApi';
 
 export const ChatPage: React.FC = () => {
   const { userId: partnerId } = useParams<{ userId: string }>();
+  const [chatViewportHeight, setChatViewportHeight] = useState(() => window.visualViewport?.height || window.innerHeight);
   const navigate = useNavigate();
   const { user } = useAuth();
   const { toast } = useToast();
@@ -195,6 +196,20 @@ export const ChatPage: React.FC = () => {
 
   // Feature 99: AI Image Enhancement Preview
   const [pendingEnhanceImage, setPendingEnhanceImage] = useState<File | null>(null);
+
+  // Keep the composer above the on-screen keyboard on mobile browsers.
+  useEffect(() => {
+    const updateViewportHeight = () => {
+      setChatViewportHeight(window.visualViewport?.height || window.innerHeight);
+    };
+    updateViewportHeight();
+    window.visualViewport?.addEventListener('resize', updateViewportHeight);
+    window.addEventListener('resize', updateViewportHeight);
+    return () => {
+      window.visualViewport?.removeEventListener('resize', updateViewportHeight);
+      window.removeEventListener('resize', updateViewportHeight);
+    };
+  }, []);
 
   // Fetch partner profile & check block status
   useEffect(() => {
@@ -893,8 +908,9 @@ export const ChatPage: React.FC = () => {
       const alias = contactAliasDraft.trim();
       const { error } = await supabase.from('contacts').upsert({ user_id: user.id, contact_id: partnerId, custom_name: alias || null }, { onConflict: 'user_id,contact_id' });
       if (error) throw error;
-      setPartnerProfile((current) => current ? { ...current, display_name: alias || current.username || current.display_name } : current);
-      toast('Contact name updated for you only.', 'success');
+      setPartnerProfile((current) => current ? { ...current, display_name: alias || current.display_name || current.username || 'Contact' } : current);
+      setContactAliasDraft(alias);
+      toast('Contact name updated for you only. Return to chats to see the updated name.', 'success');
     } catch (error) {
       console.warn('Save contact alias failed:', error);
       toast('Could not save this contact name. Please try again.', 'error');
@@ -909,7 +925,7 @@ export const ChatPage: React.FC = () => {
   const wordCount = inputText.trim().split(/\s+/).filter(Boolean).length;
 
   return (
-    <div className="flex flex-col h-screen h-[100dvh] bg-white dark:bg-[#0B0F1A] text-black dark:text-white overflow-hidden">
+    <div className="flex flex-col bg-white dark:bg-[#0B0F1A] text-black dark:text-white overflow-hidden" style={{ height: `${chatViewportHeight}px` }}>
       {/* Hidden file input for media picker */}
       <input
         type="file"
