@@ -96,6 +96,10 @@ export const AICharactersPage: React.FC = () => {
       toast('Character name and role are required.', 'error');
       return;
     }
+    if (!editingId && characters.length >= 40) {
+      toast('You can keep up to 40 characters in this browser. Export a backup before removing one.', 'error');
+      return;
+    }
     if (form.behavior.length > 2000 || form.scenario.length > 2000) {
       toast('Behavior and scenario must each be under 2,000 characters.', 'error');
       return;
@@ -248,7 +252,7 @@ export const AICharactersPage: React.FC = () => {
                 <div className="flex items-center gap-3"><Avatar name={character.name} avatarUrl={character.avatarUrl} size="lg" /><div className="min-w-0 flex-1"><h3 className="font-black truncate">{character.name}</h3><p className="text-xs text-gray-500 line-clamp-2">{character.role}</p></div><span title="Saved on this device">🔒</span></div>
                 <p className="text-sm text-gray-600 dark:text-gray-300 line-clamp-3">{character.behavior || 'Personality will develop from the role and scenario.'}</p>
                 <div className="flex flex-wrap gap-1.5 text-[10px]"><span className="rounded-full bg-blue-50 dark:bg-blue-950/40 text-blue-700 dark:text-blue-300 px-2 py-1">{character.responseLength}</span><span className="rounded-full bg-purple-50 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 px-2 py-1">{character.language}</span><span className="rounded-full bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 px-2 py-1">Local chat</span></div>
-                <div className="grid grid-cols-2 gap-2 mt-auto pt-2"><button onClick={() => navigate(`/ai-characters/${character.id}`)} className="rounded-xl bg-[#0E2A6E] text-white px-3 py-2.5 text-xs font-black">💬 Chat</button><button onClick={() => startEdit(character)} className="rounded-xl bg-gray-100 dark:bg-gray-800 px-3 py-2.5 text-xs font-bold">Edit</button><button onClick={() => deleteCharacter(character)} className="rounded-xl border border-rose-200 dark:border-rose-900 text-rose-600 px-3 py-2 text-xs font-bold">Delete</button><button onClick={() => navigate(`/chats?addAI=${character.id}`)} className="rounded-xl border border-gray-200 dark:border-gray-700 px-3 py-2 text-xs font-bold">👥 Group info</button></div>
+                <div className="grid grid-cols-2 gap-2 mt-auto pt-2"><button onClick={() => navigate(`/ai-characters/${character.id}`)} className="rounded-xl bg-[#0E2A6E] text-white px-3 py-2.5 text-xs font-black">💬 Chat</button><button onClick={() => startEdit(character)} className="rounded-xl bg-gray-100 dark:bg-gray-800 px-3 py-2.5 text-xs font-bold">Edit</button><button onClick={() => { toast('Open the target group and tap 🎭 to add this character.', 'info'); navigate('/chats'); }} className="rounded-xl border border-gray-200 dark:border-gray-700 px-3 py-2 text-xs font-bold">👥 Add to group</button><button onClick={() => deleteCharacter(character)} className="rounded-xl border border-rose-200 dark:border-rose-900 text-rose-600 px-3 py-2 text-xs font-bold">Delete</button></div>
               </article>
             ))}
           </div>
