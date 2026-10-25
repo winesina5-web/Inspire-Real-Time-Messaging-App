@@ -136,7 +136,8 @@ export const CallsPage: React.FC = () => {
       `).eq('id', rowId).maybeSingle();
       if (error || !c) return;
       const isCaller = c.caller_id === user.id;
-      const partnerProfile = (isCaller ? c.callee : c.caller) as Profile | null;
+      const relatedProfile = isCaller ? c.callee : c.caller;
+      const partnerProfile = (Array.isArray(relatedProfile) ? relatedProfile[0] : relatedProfile) as Profile | null;
       const record: CallRecord = {
         id: c.id, caller_id: c.caller_id, callee_id: c.callee_id,
         type: c.type, status: c.status, started_at: c.started_at,
