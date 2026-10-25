@@ -84,7 +84,7 @@ export const IncomingCallListener: React.FC = () => {
   return (
     <div className="fixed inset-0 z-[70] bg-black/65 backdrop-blur-sm flex items-center justify-center p-4">
       <div className="w-full max-w-sm rounded-3xl bg-white dark:bg-[#161B2B] text-black dark:text-white border border-gray-200 dark:border-gray-800 p-6 text-center shadow-2xl">
-        <Avatar name={incoming.caller.display_name || incoming.caller.username} avatarUrl={incoming.caller.avatar_url} size="xl" />
+        <Avatar name={incoming.caller.display_name || incoming.caller.username} avatarUrl={incoming.caller.avatar_url || undefined} size="xl" />
         <h2 className="mt-3 font-black text-lg">{incoming.caller.display_name || incoming.caller.username}</h2>
         <p className="text-sm text-gray-500 mt-1">Incoming {incoming.type} call</p>
         <div className="flex gap-3 mt-6">
