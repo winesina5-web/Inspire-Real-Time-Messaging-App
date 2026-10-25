@@ -1,10 +1,3 @@
-export interface Env {
-  AI?: { run(model: string, input: unknown): Promise<any> };
-  SUPABASE_URL: string;
-  SUPABASE_ANON_KEY: string;
-  ALLOWED_ORIGINS?: string;
-}
-
 const MODEL = '@cf/meta/llama-3.1-8b-instruct-fast';
 const DEFAULT_ORIGINS = [
   'https://inspire-real-time-messaging-app.pages.dev',
@@ -13,7 +6,7 @@ const DEFAULT_ORIGINS = [
   'http://127.0.0.1:3000',
 ];
 
-function cors(request: Request, env: Env): Headers {
+function cors(request, env) {
   const origin = request.headers.get('Origin') || '';
   const allowed = [...DEFAULT_ORIGINS, ...(env.ALLOWED_ORIGINS || '').split(',').map((v) => v.trim()).filter(Boolean)];
   const headers = new Headers({
@@ -26,13 +19,13 @@ function cors(request: Request, env: Env): Headers {
   return headers;
 }
 
-function json(data: unknown, status = 200, headers?: Headers): Response {
+function json(data, status = 200, headers?) {
   const h = new Headers(headers);
   h.set('Content-Type', 'application/json; charset=utf-8');
   return new Response(JSON.stringify(data), { status, headers: h });
 }
 
-async function requireUser(request: Request, env: Env): Promise<any | null> {
+async function requireUser(request, env): Promise<any | null> {
   const auth = request.headers.get('Authorization') || '';
   if (!auth.startsWith('Bearer ') || !env.SUPABASE_URL || !env.SUPABASE_ANON_KEY) return null;
   const response = await fetch(`${env.SUPABASE_URL}/auth/v1/user`, {
@@ -42,7 +35,7 @@ async function requireUser(request: Request, env: Env): Promise<any | null> {
   return await response.json();
 }
 
-async function ask(env: Env, system: string, prompt: string, maxTokens = 180): Promise<string> {
+async function ask(env, system, prompt, maxTokens = 180): Promise<string> {
   if (!env.AI) throw new Error('Workers AI binding is missing on inspire-worker.');
   const result = await env.AI.run(MODEL, {
     messages: [{ role: 'system', content: system }, { role: 'user', content: prompt.slice(0, 12000) }],
@@ -53,25 +46,25 @@ async function ask(env: Env, system: string, prompt: string, maxTokens = 180): P
   return text.trim();
 }
 
-function parseJson<T>(text: string, fallback: T): T {
+function parseJson(text, fallback: T): T {
   const cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
-  try { return JSON.parse(cleaned) as T; } catch {
+  try { return JSON.parse(cleaned); } catch {
     const start = cleaned.indexOf('[');
     const end = cleaned.lastIndexOf(']');
     if (start >= 0 && end > start) {
-      try { return JSON.parse(cleaned.slice(start, end + 1)) as T; } catch { /* use fallback */ }
+      try { return JSON.parse(cleaned.slice(start, end + 1)); } catch { /* use fallback */ }
     }
     const objectStart = cleaned.indexOf('{');
     const objectEnd = cleaned.lastIndexOf('}');
     if (objectStart >= 0 && objectEnd > objectStart) {
-      try { return JSON.parse(cleaned.slice(objectStart, objectEnd + 1)) as T; } catch { /* use fallback */ }
+      try { return JSON.parse(cleaned.slice(objectStart, objectEnd + 1)); } catch { /* use fallback */ }
     }
     return fallback;
   }
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request, env): Promise<Response> {
     const headers = cors(request, env);
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers });
     const url = new URL(request.url);
@@ -81,7 +74,7 @@ export default {
     const user = await requireUser(request, env).catch(() => null);
     if (!user?.id) return json({ error: 'Unauthorized: valid Supabase session required' }, 401, headers);
 
-    const body = await request.json().catch(() => ({})) as Record<string, any>;
+    const body = await request.json().catch(() => ({}));
     try {
       switch (url.pathname) {
         case '/api/ai/smart-reply': {
@@ -160,7 +153,7 @@ export default {
             body: JSON.stringify({ expiresIn: 300 }),
           });
           if (!signed.ok) return json({ error: 'Could not access audio media for transcription' }, 403, headers);
-          const signedData = await signed.json() as { signedURL?: string };
+          const signedData = await signed.json() as { signedURL? };
           const audioUrl = signedData.signedURL?.startsWith('http') ? signedData.signedURL : `${env.SUPABASE_URL}/storage/v1${signedData.signedURL || ''}`;
           const audioResponse = await fetch(audioUrl);
           if (!audioResponse.ok) return json({ error: 'Could not download audio media' }, 502, headers);
