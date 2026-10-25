@@ -180,6 +180,12 @@ export const ChatListPage: React.FC = () => {
         .select('contact_id, custom_name, profile:contact_id (*)')
         .eq('user_id', user.id);
 
+      const customNamesMap = new Map<string, string>();
+      (contactsData || []).forEach((contact: { contact_id?: string; custom_name?: string | null }) => {
+        const customName = contact.custom_name?.trim();
+        if (contact.contact_id && customName) customNamesMap.set(contact.contact_id, customName);
+      });
+
       const loadedContacts = (contactsData || [])
         .map((contact: { profile: unknown; custom_name?: string | null }) => {
           const profile = contact.profile as Profile | null;
@@ -264,7 +270,7 @@ export const ChatListPage: React.FC = () => {
 
           const conversationList: ConversationItem[] = [];
           partnerMap.forEach((val, partnerId) => {
-            const partnerProfile = profilesMap.get(partnerId) || {
+            const basePartnerProfile = profilesMap.get(partnerId) || {
               id: partnerId,
               username: 'user',
               display_name: 'Unknown User',
@@ -276,6 +282,10 @@ export const ChatListPage: React.FC = () => {
               last_seen: new Date().toISOString(),
               created_at: new Date().toISOString(),
             };
+            const customName = customNamesMap.get(partnerId);
+            const partnerProfile = customName
+              ? { ...basePartnerProfile, display_name: customName }
+              : basePartnerProfile;
 
             conversationList.push({
               id: partnerId,
