@@ -40,7 +40,8 @@ export const workerApi = {
     responseLength?: 'short' | 'balanced' | 'detailed';
     message: string;
     history: Array<{ role: 'user' | 'assistant'; content: string }>;
-  }): Promise<{ reply: string; model?: string }> {
+    groupMode?: boolean;
+  }): Promise<{ reply: string; model?: string; shouldReply?: boolean }> {
     if (!WORKER_BASE) throw new Error('AI Character chat needs the configured Cloudflare Worker API.');
     const token = await getAuthToken();
     if (!token) throw new Error('Please sign in again to chat with AI Characters.');
@@ -59,12 +60,14 @@ export const workerApi = {
         response_length: input.responseLength || 'balanced',
         message: input.message,
         history: input.history.slice(-16),
+        group_mode: input.groupMode === true,
       }),
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || 'The AI character could not reply right now.');
+    if (data.should_reply === false) return { reply: '', shouldReply: false, model: data.model };
     if (typeof data.reply !== 'string' || !data.reply.trim()) throw new Error('The AI character returned an empty reply.');
-    return { reply: data.reply, model: data.model };
+    return { reply: data.reply, shouldReply: true, model: data.model };
   },
   /**
    * Uploads media to the authenticated user's private Supabase Storage folder.
