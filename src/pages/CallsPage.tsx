@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { Search, Phone, Video, PhoneIncoming, PhoneOutgoing, PhoneMissed, RefreshCw } from 'lucide-react';
+import { Search, Phone, Video, PhoneIncoming, PhoneOutgoing, PhoneMissed } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { BottomNav } from '../components/BottomNav';
 import { Avatar } from '../components/Avatar';
