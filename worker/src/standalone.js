@@ -272,8 +272,25 @@ export default {
         }
         case '/api/export/compliance-report':
           return json({ error: 'Compliance report export is not implemented yet.' }, 501, headers);
-        case '/api/calls/turn-credentials':
-          return json({ iceServers: [{ urls: 'stun:stun.cloudflare.com:3478' }, { urls: 'stun:stun.l.google.com:19302' }] }, 200, headers);
+        case '/api/calls/turn-credentials': {
+          const fallbackIceServers = [{ urls: 'stun:stun.cloudflare.com:3478' }, { urls: 'stun:stun.l.google.com:19302' }];
+          if (!env.TURN_KEY_ID || !env.TURN_API_TOKEN) return json({ iceServers: fallbackIceServers, turnConfigured: false }, 200, headers);
+          try {
+            const turnResponse = await fetch(`https://rtc.live.cloudflare.com/v1/turn/keys/${encodeURIComponent(env.TURN_KEY_ID)}/credentials/generate-ice-servers`, {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${env.TURN_API_TOKEN}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ ttl: 3600 }),
+            });
+            if (!turnResponse.ok) throw new Error(`TURN credential request failed (${turnResponse.status})`);
+            const turnData = await turnResponse.json();
+            const iceServers = Array.isArray(turnData.iceServers) && turnData.iceServers.length ? turnData.iceServers : fallbackIceServers;
+            const turnConfigured = iceServers.some((server) => (Array.isArray(server.urls) ? server.urls : [server.urls]).some((url) => typeof url === 'string' && (url.startsWith('turn:') || url.startsWith('turns:'))));
+            return json({ iceServers, turnConfigured }, 200, headers);
+          } catch (error) {
+            console.error('TURN credentials unavailable:', error);
+            return json({ iceServers: fallbackIceServers, turnConfigured: false }, 200, headers);
+          }
+        }
         case '/api/link-preview':
           return json({ error: 'Link preview endpoint is not included in this first deployment.' }, 501, headers);
         case '/api/gif-search': {
