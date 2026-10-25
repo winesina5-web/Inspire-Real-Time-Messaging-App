@@ -53,7 +53,7 @@ export const ChatPage: React.FC = () => {
 
   const [partnerProfile, setPartnerProfile] = useState<Profile | null>(null);
   const [partnerLoading, setPartnerLoading] = useState(true);
-  const [isBlocked, setIsBlocked] = useState(false);
+  const [isBlocked, setIsBlocked] = useState(false); // True only when the current user has blocked this contact.
 
   // Messaging hooks
   const {
@@ -189,10 +189,12 @@ export const ChatPage: React.FC = () => {
   useEffect(() => {
     if (!partnerId) return;
 
+    setIsBlocked(false);
     const fetchPartner = async () => {
       setPartnerLoading(true);
 
       if (!isConfigured) {
+        setIsBlocked(false);
         // Mock partner profile
         setPartnerProfile({
           id: partnerId,
@@ -234,17 +236,21 @@ export const ChatPage: React.FC = () => {
           });
         }
 
-        // Check if either party blocked the other
+        // Only the blocker's own block-list rows are visible under RLS.
+        // Keep this state directional so the menu can offer a real Unblock action.
         if (user) {
-          const { data: blockData } = await supabase
+          const { data: blockData, error: blockError } = await supabase
             .from('blocked_users')
-            .select('*')
-            .or(
-              `and(blocker_id.eq.${user.id},blocked_id.eq.${partnerId}),and(blocker_id.eq.${partnerId},blocked_id.eq.${user.id})`
-            )
+            .select('id')
+            .eq('blocker_id', user.id)
+            .eq('blocked_id', partnerId)
             .maybeSingle();
 
-          setIsBlocked(Boolean(blockData));
+          if (blockError) {
+            console.warn('Check block status failed:', blockError);
+          } else {
+            setIsBlocked(Boolean(blockData));
+          }
         }
       } catch (err) {
         console.warn('Error loading partner:', err);
@@ -659,24 +665,57 @@ export const ChatPage: React.FC = () => {
     setIsSearching(false);
   };
 
-  // Block user
+  // Block user and only update UI after Supabase confirms the write.
   const handleBlockUser = async () => {
     if (!user || !partnerId) return;
-    setShowBlockConfirm(false);
+    if (!isConfigured) {
+      setShowBlockConfirm(false);
+      toast('Connect to the server before blocking contacts.', 'error');
+      return;
+    }
 
-    if (isConfigured) {
-      try {
-        await supabase.from('blocked_users').insert({
-          blocker_id: user.id,
-          blocked_id: partnerId,
-        });
-      } catch (e) {
-        console.warn('Block user error:', e);
-      }
+    const { error } = await supabase.from('blocked_users').insert({
+      blocker_id: user.id,
+      blocked_id: partnerId,
+    });
+
+    if (error) {
+      console.warn('Block user error:', error);
+      toast(error.code === '23505' ? 'This contact is already blocked.' : 'Could not block this contact. Please try again.', 'error');
+      setShowBlockConfirm(false);
+      return;
     }
 
     setIsBlocked(true);
-    toast(`Blocked @${partnerProfile?.username}`, 'info');
+    setShowBlockConfirm(false);
+    toast(`Blocked @${partnerProfile?.username || 'contact'}`, 'success');
+  };
+
+  // Unblock only the current user's block-list entry.
+  const handleUnblockUser = async () => {
+    if (!user || !partnerId) return;
+    if (!isConfigured) {
+      setShowBlockConfirm(false);
+      toast('Connect to the server before unblocking contacts.', 'error');
+      return;
+    }
+
+    const { error } = await supabase
+      .from('blocked_users')
+      .delete()
+      .eq('blocker_id', user.id)
+      .eq('blocked_id', partnerId);
+
+    if (error) {
+      console.warn('Unblock user error:', error);
+      toast('Could not unblock this contact. Please try again.', 'error');
+      setShowBlockConfirm(false);
+      return;
+    }
+
+    setIsBlocked(false);
+    setShowBlockConfirm(false);
+    toast(`Unblocked @${partnerProfile?.username || 'contact'}`, 'success');
   };
 
   // Submit report
@@ -1042,10 +1081,12 @@ export const ChatPage: React.FC = () => {
                     setShowBlockConfirm(true);
                     setShowOverflowMenu(false);
                   }}
-                  className="w-full px-4 py-2 text-left hover:bg-rose-50 dark:hover:bg-rose-950/40 text-rose-600 dark:text-rose-400 flex items-center space-x-2"
+                  className={`w-full px-4 py-2 text-left flex items-center space-x-2 ${isBlocked
+                    ? 'hover:bg-emerald-50 dark:hover:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400'
+                    : 'hover:bg-rose-50 dark:hover:bg-rose-950/40 text-rose-600 dark:text-rose-400'}`}
                 >
-                  <span>🚫</span>
-                  <span>Block contact</span>
+                  <span>{isBlocked ? '✅' : '🚫'}</span>
+                  <span>{isBlocked ? 'Unblock contact' : 'Block contact'}</span>
                 </button>
               </div>
             </>
@@ -1677,15 +1718,17 @@ export const ChatPage: React.FC = () => {
         </div>
       )}
 
-      {/* Block Confirmation Modal */}
+      {/* Block / Unblock Confirmation Modal */}
       {showBlockConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-fade-in">
           <div className="w-full max-w-sm bg-white dark:bg-[#161B2B] rounded-3xl p-6 border border-[#E5E7EB] dark:border-[#2A3348] shadow-2xl animate-slide-up">
-            <h3 className="font-extrabold text-base text-rose-600 mb-2">
-              Block @{partnerProfile?.username}?
+            <h3 className={`font-extrabold text-base mb-2 ${isBlocked ? 'text-emerald-600' : 'text-rose-600'}`}>
+              {isBlocked ? `Unblock @${partnerProfile?.username || 'contact'}?` : `Block @${partnerProfile?.username || 'contact'}?`}
             </h3>
             <p className="text-xs text-[#4B5563] dark:text-[#9CA3AF] leading-relaxed mb-6">
-              Blocked contacts cannot send you messages or view your online presence. You can unblock them later from settings.
+              {isBlocked
+                ? 'This contact will be removed from your block list and you can message them again, subject to their own privacy settings.'
+                : 'Blocking this contact prevents messaging them and applies your block-list privacy restrictions. You can unblock them later from this chat or your profile.'}
             </p>
             <div className="flex space-x-2">
               <button
@@ -1695,10 +1738,10 @@ export const ChatPage: React.FC = () => {
                 Cancel
               </button>
               <button
-                onClick={handleBlockUser}
-                className="flex-1 py-2.5 rounded-xl bg-rose-600 text-white text-xs font-bold hover:bg-rose-700 active:scale-95"
+                onClick={isBlocked ? handleUnblockUser : handleBlockUser}
+                className={`flex-1 py-2.5 rounded-xl text-white text-xs font-bold active:scale-95 ${isBlocked ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-rose-600 hover:bg-rose-700'}`}
               >
-                Confirm Block
+                {isBlocked ? 'Confirm Unblock' : 'Confirm Block'}
               </button>
             </div>
           </div>
