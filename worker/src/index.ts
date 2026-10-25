@@ -182,14 +182,30 @@ export default {
           break;
         }
 
-        case '/api/calls/turn-credentials':
-          response = Response.json({
-            iceServers: [
-              { urls: 'stun:stun.cloudflare.com:3478' },
-              { urls: 'stun:stun.l.google.com:19302' },
-            ],
-          });
+        case '/api/calls/turn-credentials': {
+          const fallbackIceServers = [
+            { urls: 'stun:stun.cloudflare.com:3478' },
+            { urls: 'stun:stun.l.google.com:19302' },
+          ];
+          if (!env.TURN_KEY_ID || !env.TURN_API_TOKEN) {
+            response = Response.json({ iceServers: fallbackIceServers, turnConfigured: false });
+            break;
+          }
+          try {
+            const turnResponse = await fetch(`https://rtc.live.cloudflare.com/v1/turn/keys/${encodeURIComponent(env.TURN_KEY_ID)}/credentials/generate-ice-servers`, {
+              method: 'POST',
+              headers: { Authorization: `Bearer ${env.TURN_API_TOKEN}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({ ttl: 3600 }),
+            });
+            if (!turnResponse.ok) throw new Error(`TURN credential request failed (${turnResponse.status})`);
+            const turnData = await turnResponse.json() as { iceServers?: Array<{ urls: string | string[]; username?: string; credential?: string }> };
+            response = Response.json({ iceServers: turnData.iceServers?.length ? turnData.iceServers : fallbackIceServers, turnConfigured: Boolean(turnData.iceServers?.some((server) => String(server.urls).includes('turn:') || (Array.isArray(server.urls) && server.urls.some((url) => url.startsWith('turn:') || url.startsWith('turns:'))))) });
+          } catch (error) {
+            console.error('TURN credentials unavailable:', error);
+            response = Response.json({ iceServers: fallbackIceServers, turnConfigured: false });
+          }
           break;
+        }
 
         case '/api/link-preview': {
           const body = (await request.json().catch(() => ({}))) as { url?: string };

@@ -6,4 +6,6 @@ export interface Env {
   ALLOWED_ORIGINS?: string;
   TURNSTILE_SECRET_KEY?: string;
   BOT_RELAY_INTERNAL_SECRET?: string;
+  TURN_KEY_ID?: string;
+  TURN_API_TOKEN?: string;
 }

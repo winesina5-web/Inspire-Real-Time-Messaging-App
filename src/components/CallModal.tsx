@@ -21,6 +21,7 @@ export const CallModal: React.FC<CallModalProps> = ({ callId, partner, type, isC
   const [isVideoOff, setIsVideoOff] = useState(type === 'voice');
   const [callStatus, setCallStatus] = useState<'connecting' | 'connected' | 'ended' | 'error'>('connecting');
   const [errorMessage, setErrorMessage] = useState('');
+  const hasTurnRelayRef = useRef(false);
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -33,6 +34,7 @@ export const CallModal: React.FC<CallModalProps> = ({ callId, partner, type, isC
   const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
   const offerSentRef = useRef(false);
   const endedRef = useRef(false);
+  const iceRestartAttemptedRef = useRef(false);
 
   useEffect(() => {
     if (!user || !isConfigured) {
@@ -42,6 +44,7 @@ export const CallModal: React.FC<CallModalProps> = ({ callId, partner, type, isC
     }
     let mounted = true;
     let durationTimer: ReturnType<typeof setInterval> | null = null;
+    let disconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
     const sendSignal = async (eventType: 'offer' | 'answer' | 'ice-candidate' | 'hangup' | 'reject', payload: unknown = {}) => {
       const { error } = await supabase.from('call_signals').insert({
@@ -52,6 +55,18 @@ export const CallModal: React.FC<CallModalProps> = ({ callId, partner, type, isC
         payload,
       });
       if (error) throw error;
+    };
+
+    const restartIce = async (pc: RTCPeerConnection) => {
+      if (!isCaller || iceRestartAttemptedRef.current || !mounted || pc.signalingState === 'closed') return;
+      iceRestartAttemptedRef.current = true;
+      try {
+        const offer = await pc.createOffer({ iceRestart: true });
+        await pc.setLocalDescription(offer);
+        await sendSignal('offer', { sdp: pc.localDescription, iceRestart: true });
+      } catch (error) {
+        console.warn('ICE restart failed:', error);
+      }
     };
 
     const applyPendingCandidates = async (pc: RTCPeerConnection) => {
@@ -76,7 +91,7 @@ export const CallModal: React.FC<CallModalProps> = ({ callId, partner, type, isC
           await sendSignal('answer', { sdp: pc.localDescription });
           await supabase.from('calls').update({ status: 'answered' }).eq('id', callId);
         } else if (signal.event_type === 'answer' && isCaller) {
-          if (!pc.currentRemoteDescription) {
+          if (pc.signalingState === 'have-local-offer' || !pc.currentRemoteDescription) {
             await pc.setRemoteDescription(new RTCSessionDescription(signal.payload.sdp));
             await applyPendingCandidates(pc);
           }
@@ -112,7 +127,8 @@ export const CallModal: React.FC<CallModalProps> = ({ callId, partner, type, isC
         if (localVideoRef.current) localVideoRef.current.srcObject = stream;
 
         const credentials = await workerApi.getTurnCredentials();
-        const pc = new RTCPeerConnection({ iceServers: credentials.iceServers });
+        hasTurnRelayRef.current = Boolean(credentials.turnConfigured);
+        const pc = new RTCPeerConnection({ iceServers: credentials.iceServers, iceCandidatePoolSize: 2 });
         peerConnectionRef.current = pc;
         stream.getTracks().forEach((track) => pc.addTrack(track, stream));
 
@@ -120,8 +136,19 @@ export const CallModal: React.FC<CallModalProps> = ({ callId, partner, type, isC
           const remote = remoteStreamRef.current || new MediaStream();
           remoteStreamRef.current = remote;
           if (!remote.getTracks().some((track) => track.id === event.track.id)) remote.addTrack(event.track);
-          if (remoteVideoRef.current) remoteVideoRef.current.srcObject = remote;
-          if (remoteAudioRef.current) remoteAudioRef.current.srcObject = remote;
+          const video = remoteVideoRef.current;
+          const audio = remoteAudioRef.current;
+          if (video && type === 'video') {
+            video.srcObject = remote;
+            void video.play().catch((error) => console.debug('Remote video autoplay awaits user gesture:', error));
+          }
+          if (audio) {
+            audio.srcObject = remote;
+            void audio.play().catch((error) => {
+              console.debug('Remote audio autoplay blocked:', error);
+              if (mounted) setErrorMessage('Tap the screen once to allow audio playback.');
+            });
+          }
         };
         pc.onicecandidate = (event) => {
           if (event.candidate && mounted) {
@@ -131,11 +158,35 @@ export const CallModal: React.FC<CallModalProps> = ({ callId, partner, type, isC
         pc.onconnectionstatechange = () => {
           if (!mounted) return;
           if (pc.connectionState === 'connected') {
+            if (disconnectTimer) clearTimeout(disconnectTimer);
+            disconnectTimer = null;
             setCallStatus('connected');
+            setErrorMessage('');
             if (!durationTimer) durationTimer = setInterval(() => setDuration((prev) => prev + 1), 1000);
-          } else if (['failed', 'disconnected'].includes(pc.connectionState)) {
-            setCallStatus('error');
-            setErrorMessage('Connection could not be established. Check the network or try again.');
+          } else if (pc.connectionState === 'disconnected') {
+            // Mobile networks briefly drop ICE while switching Wi-Fi/cellular. Do not end the call immediately.
+            if (!disconnectTimer) disconnectTimer = setTimeout(() => {
+              if (mounted && pc.connectionState === 'disconnected') {
+                setCallStatus('connecting');
+                setErrorMessage('Network interrupted. Trying to reconnect…');
+              }
+              disconnectTimer = null;
+            }, 10000);
+          } else if (pc.connectionState === 'failed') {
+            if (isCaller && !iceRestartAttemptedRef.current) {
+              setErrorMessage('Network path failed. Trying to reconnect…');
+              void restartIce(pc);
+              if (!disconnectTimer) disconnectTimer = setTimeout(() => {
+                if (mounted && pc.connectionState !== 'connected') {
+                  setCallStatus('error');
+                  setErrorMessage(hasTurnRelayRef.current ? 'Could not connect media. Check network permissions and try again.' : 'This network needs a TURN relay. Configure TURN_KEY_ID and TURN_API_TOKEN on the inspire-worker Worker, then retry.');
+                }
+                disconnectTimer = null;
+              }, 12000);
+            } else {
+              setCallStatus('error');
+              setErrorMessage('Could not connect media. Check microphone permissions and network connectivity.');
+            }
           }
         };
 
@@ -174,6 +225,7 @@ export const CallModal: React.FC<CallModalProps> = ({ callId, partner, type, isC
     return () => {
       mounted = false;
       if (durationTimer) clearInterval(durationTimer);
+      if (disconnectTimer) clearTimeout(disconnectTimer);
       if (channelRef.current) void supabase.removeChannel(channelRef.current);
       channelRef.current = null;
       localStreamRef.current?.getTracks().forEach((track) => track.stop());
@@ -222,7 +274,7 @@ export const CallModal: React.FC<CallModalProps> = ({ callId, partner, type, isC
       {type === 'video' ? (
         <div className="flex-1 min-h-0 flex flex-col gap-3 justify-center py-4">
           <div className="relative flex-1 min-h-0 rounded-3xl overflow-hidden bg-black/50 border border-white/15">
-            <video ref={remoteVideoRef} autoPlay playsInline className="w-full h-full object-contain" />
+            <video ref={remoteVideoRef} autoPlay playsInline muted className="w-full h-full object-contain" />
             {callStatus !== 'connected' && <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-center p-4"><Avatar name={partner.display_name} avatarUrl={partner.avatar_url} size="xl" /><p className="text-sm">{callStatus === 'error' ? errorMessage : 'Waiting for the other person…'}</p></div>}
           </div>
           <video ref={localVideoRef} autoPlay playsInline muted className="w-28 h-36 sm:w-36 sm:h-44 object-cover rounded-2xl bg-black/70 self-end border border-white/20" />
@@ -231,10 +283,11 @@ export const CallModal: React.FC<CallModalProps> = ({ callId, partner, type, isC
         <div className="flex-1 flex flex-col items-center justify-center gap-4 text-center">
           <Avatar name={partner.display_name} avatarUrl={partner.avatar_url} size="xl" />
           <p className="text-sm text-blue-100">{callStatus === 'connected' ? `Connected · ${formatDuration(duration)}` : errorMessage || 'Waiting for the other person to answer…'}</p>
-          <audio ref={remoteAudioRef} autoPlay />
+
         </div>
       )}
 
+      <audio ref={remoteAudioRef} autoPlay playsInline className="hidden" />
       {callStatus === 'error' && errorMessage && <p role="alert" className="text-sm text-rose-200 text-center">{errorMessage}</p>}
       <div className="max-w-md mx-auto w-full flex items-center justify-around py-3">
         <button onClick={handleToggleMute} className={`w-14 h-14 rounded-full flex items-center justify-center text-xl ${isMuted ? 'bg-red-500' : 'bg-white/15'}`} title={isMuted ? 'Unmute' : 'Mute'}>{isMuted ? '🔇' : '🎙️'}</button>

@@ -1,4 +1,5 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { Search, Phone, Video, PhoneIncoming, PhoneOutgoing, PhoneMissed } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { BottomNav } from '../components/BottomNav';
 import { Avatar } from '../components/Avatar';
@@ -18,6 +19,8 @@ export const CallsPage: React.FC = () => {
   const [contacts, setContacts] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
   const [showContactPicker, setShowContactPicker] = useState(false);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [historyFilter, setHistoryFilter] = useState<'all' | 'missed' | 'outgoing' | 'incoming'>('all');
   const [activeCall, setActiveCall] = useState<{ partner: Profile; type: 'voice' | 'video'; callId: string } | null>(null);
 
   // Load real call history from Supabase calls table
@@ -97,6 +100,64 @@ export const CallsPage: React.FC = () => {
 
     loadCallsAndContacts();
   }, [user]);
+
+  const visibleCalls = useMemo(() => {
+    const query = searchTerm.trim().toLowerCase();
+    return calls.filter((call) => {
+      const isOutgoing = call.caller_id === user?.id;
+      const matchesFilter = historyFilter === 'all'
+        || (historyFilter === 'missed' && call.status === 'missed')
+        || (historyFilter === 'outgoing' && isOutgoing)
+        || (historyFilter === 'incoming' && !isOutgoing);
+      const matchesSearch = !query || [
+        call.partner?.display_name || '',
+        call.partner?.username || '',
+        call.type,
+        call.status,
+      ].some((value) => value.toLowerCase().includes(query));
+      return matchesFilter && matchesSearch;
+    });
+  }, [calls, historyFilter, searchTerm, user?.id]);
+
+  // Keep call history live when either participant starts, answers or ends a call.
+  useEffect(() => {
+    if (!user || !isConfigured) return;
+    const applyCallChange = async (payload: any) => {
+      if (payload.eventType === 'DELETE') {
+        setCalls((previous) => previous.filter((call) => call.id !== payload.old.id));
+        return;
+      }
+      const rowId = payload.new?.id;
+      if (!rowId) return;
+      const { data: c, error } = await supabase.from('calls').select(`
+        id, caller_id, callee_id, type, status, started_at, duration_seconds,
+        caller:profiles!caller_id(id, username, display_name, avatar_url),
+        callee:profiles!callee_id(id, username, display_name, avatar_url)
+      `).eq('id', rowId).maybeSingle();
+      if (error || !c) return;
+      const isCaller = c.caller_id === user.id;
+      const relatedProfile = isCaller ? c.callee : c.caller;
+      const partnerProfile = (Array.isArray(relatedProfile) ? relatedProfile[0] : relatedProfile) as Profile | null;
+      const record: CallRecord = {
+        id: c.id, caller_id: c.caller_id, callee_id: c.callee_id,
+        type: c.type, status: c.status, started_at: c.started_at,
+        duration_seconds: c.duration_seconds || 0,
+        partner: partnerProfile || {
+          id: isCaller ? c.callee_id : c.caller_id, username: 'user',
+          display_name: 'Contact', bio: null, avatar_url: null, role: 'user',
+          status: 'active', is_online: false, last_seen: new Date().toISOString(),
+          created_at: new Date().toISOString(),
+        },
+      };
+      setCalls((previous) => [record, ...previous.filter((call) => call.id !== record.id)]
+        .sort((a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime()));
+    };
+    const channel = supabase.channel(`call_history_${user.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'calls', filter: `caller_id=eq.${user.id}` }, (payload) => { void applyCallChange(payload); })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'calls', filter: `callee_id=eq.${user.id}` }, (payload) => { void applyCallChange(payload); })
+      .subscribe();
+    return () => { void supabase.removeChannel(channel); };
+  }, [user?.id]);
 
   const handleStartCall = async (partner: Profile, type: 'voice' | 'video') => {
     setShowContactPicker(false);
@@ -181,15 +242,29 @@ export const CallsPage: React.FC = () => {
 
       {/* Main List */}
       <main className="max-w-md mx-auto px-4 py-3">
+        <div className="sticky top-[62px] z-20 bg-white/95 dark:bg-[#0B0F1A]/95 backdrop-blur py-2 space-y-3">
+          <label className="flex items-center gap-2 rounded-2xl border border-gray-200 dark:border-gray-700 px-3 py-2.5">
+            <Search size={16} className="text-gray-400" />
+            <input value={searchTerm} onChange={(event) => setSearchTerm(event.target.value)} placeholder="Search call history" className="min-w-0 flex-1 bg-transparent text-sm outline-none" />
+            {searchTerm && <button onClick={() => setSearchTerm('')} aria-label="Clear search" className="text-gray-400"><span>×</span></button>}
+          </label>
+          <div className="flex gap-2 overflow-x-auto pb-1">
+            {([{ id: 'all', label: 'All' }, { id: 'missed', label: 'Missed' }, { id: 'outgoing', label: 'Outgoing' }, { id: 'incoming', label: 'Incoming' }] as const).map((filter) => (
+              <button key={filter.id} onClick={() => setHistoryFilter(filter.id)} className={`shrink-0 rounded-full px-3.5 py-2 text-xs font-bold ${historyFilter === filter.id ? 'bg-[#0E2A6E] text-white' : 'bg-gray-100 dark:bg-gray-800 text-gray-600 dark:text-gray-300'}`}>
+                {filter.label}{filter.id === 'missed' && calls.filter((call) => call.status === 'missed').length > 0 ? ` · ${calls.filter((call) => call.status === 'missed').length}` : ''}
+              </button>
+            ))}
+          </div>
+        </div>
         {loading ? (
           <div className="flex items-center justify-center py-16">
             <div className="w-8 h-8 border-3 border-[#0E2A6E] border-t-transparent rounded-full animate-spin" />
           </div>
-        ) : calls.length === 0 ? (
+        ) : visibleCalls.length === 0 ? (
           <div className="text-center py-16 text-gray-500 text-xs space-y-3">
             <div className="text-4xl">📞</div>
-            <p className="font-semibold text-black dark:text-white">No calls recorded yet</p>
-            <p className="text-gray-400">Start an encrypted real-time audio or video call with any contact.</p>
+            <p className="font-semibold text-black dark:text-white">{calls.length === 0 ? 'No calls recorded yet' : 'No matching calls'}</p>
+            <p className="text-gray-400">{calls.length === 0 ? 'Start a voice or video call with a contact.' : 'Try another search or filter.'}</p>
             <button
               onClick={() => setShowContactPicker(true)}
               className="mt-2 px-4 py-2 rounded-xl bg-[#0E2A6E] text-white font-bold text-xs"
@@ -199,7 +274,7 @@ export const CallsPage: React.FC = () => {
           </div>
         ) : (
           <div className="divide-y divide-[#E5E7EB] dark:divide-[#2A3348]">
-            {calls.map((call) => (
+            {visibleCalls.map((call) => (
               <div
                 key={call.id}
                 className="flex items-center justify-between py-3.5 px-2 rounded-2xl hover:bg-gray-50 dark:hover:bg-gray-800/40 transition-colors"
@@ -210,37 +285,22 @@ export const CallsPage: React.FC = () => {
                     avatarUrl={call.partner?.avatar_url}
                     size="md"
                   />
-                  <div>
-                    <h3 className="font-bold text-sm text-black dark:text-white">
-                      {call.partner?.display_name || 'Contact'}
-                    </h3>
-                    <div className="flex items-center space-x-1.5 text-[11px] text-[#4B5563] dark:text-[#9CA3AF]">
-                      <span className={call.status === 'missed' ? 'text-red-500 font-bold' : 'text-emerald-500 font-bold'}>
-                        {call.status === 'missed' ? '↙ Missed' : '↗ ' + (call.type === 'video' ? 'Video' : 'Voice')}
-                      </span>
-                      <span>•</span>
-                      <span>
-                        {call.duration_seconds ? formatDuration(call.duration_seconds) : new Date(call.started_at).toLocaleDateString()}
+                  <div className="min-w-0">
+                    <h3 className="font-bold text-sm text-black dark:text-white truncate">{call.partner?.display_name || 'Contact'}</h3>
+                    <div className="flex items-center gap-1.5 text-[11px] text-[#4B5563] dark:text-[#9CA3AF] mt-0.5">
+                      {call.status === 'missed' ? <PhoneMissed size={13} className="text-red-500" /> : call.caller_id === user?.id ? <PhoneOutgoing size={13} className="text-emerald-500" /> : <PhoneIncoming size={13} className="text-emerald-500" />}
+                      <span className={call.status === 'missed' ? 'text-red-500 font-bold' : call.status === 'declined' ? 'text-amber-600 font-bold' : 'font-semibold'}>
+                        {call.status === 'missed' ? 'Missed' : call.status === 'declined' ? 'Declined' : call.status === 'ringing' ? (call.caller_id === user?.id ? 'Outgoing · No answer yet' : 'Incoming · Ringing') : call.status === 'answered' ? (call.caller_id === user?.id ? 'Outgoing' : 'Incoming') : 'Call'}
+                        {' · '}{call.type === 'video' ? 'Video' : 'Voice'}
                       </span>
                     </div>
+                    <p className="text-[10px] text-gray-400 mt-1">{new Date(call.started_at).toLocaleString()} {call.duration_seconds > 0 ? ` · ${formatDuration(call.duration_seconds)}` : ''}</p>
                   </div>
                 </div>
 
                 <div className="flex items-center space-x-2">
-                  <button
-                    onClick={() => call.partner && handleStartCall(call.partner, 'voice')}
-                    className="w-8 h-8 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 flex items-center justify-center text-sm hover:bg-[#0E2A6E] hover:text-white transition-colors"
-                    title="Start Voice Call"
-                  >
-                    📞
-                  </button>
-                  <button
-                    onClick={() => call.partner && handleStartCall(call.partner, 'video')}
-                    className="w-8 h-8 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 flex items-center justify-center text-sm hover:bg-[#0E2A6E] hover:text-white transition-colors"
-                    title="Start Video Call"
-                  >
-                    📹
-                  </button>
+                  <button onClick={() => call.partner && void handleStartCall(call.partner, 'voice')} className="w-9 h-9 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 flex items-center justify-center hover:bg-[#0E2A6E] hover:text-white transition-colors" title="Start voice call" aria-label="Start voice call"><Phone size={16} /></button>
+                  <button onClick={() => call.partner && void handleStartCall(call.partner, 'video')} className="w-9 h-9 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-700 dark:text-gray-200 flex items-center justify-center hover:bg-[#0E2A6E] hover:text-white transition-colors" title="Start video call" aria-label="Start video call"><Video size={16} /></button>
                 </div>
               </div>
             ))}
