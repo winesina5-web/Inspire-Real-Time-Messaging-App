@@ -63,6 +63,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const isDeleted = isMessageDeletedForViewer(message, currentUserId);
   const [showReactionsPicker, setShowReactionsPicker] = useState(false);
   const [showActionsMenu, setShowActionsMenu] = useState(false);
+  const [showMessageInfo, setShowMessageInfo] = useState(false);
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const touchMovedRef = useRef(false);
   const clearLongPress = () => { if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current); longPressTimerRef.current = null; };
@@ -823,12 +824,26 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
 
         {showActionsMenu && (
           <>
-            <div className="fixed inset-0 z-30" onClick={() => setShowActionsMenu(false)} />
+            <div className="fixed inset-0 z-30 bg-black/35 md:bg-transparent" onClick={() => setShowActionsMenu(false)} />
             <div
-              className={`absolute z-40 bg-white dark:bg-[#161B2B] shadow-2xl border border-gray-200 dark:border-gray-700 rounded-2xl py-1.5 w-52 text-xs font-semibold ${
-                isMe ? 'right-0 top-8' : 'left-0 top-8'
+              className={`fixed inset-x-3 bottom-3 z-40 bg-white dark:bg-[#161B2B] shadow-2xl border border-gray-200 dark:border-gray-700 rounded-2xl py-2 w-auto max-h-[72dvh] overflow-y-auto text-xs font-semibold pb-[max(0.5rem,env(safe-area-inset-bottom))] md:absolute md:inset-x-auto md:bottom-auto md:top-8 md:w-56 md:max-h-[70vh] md:rounded-2xl ${
+                isMe ? 'md:right-0' : 'md:left-0'
               }`}
             >
+              <div className="px-3 pb-2 mb-1 border-b border-gray-100 dark:border-gray-800">
+                <p className="text-[10px] uppercase tracking-wide font-black text-gray-400 mb-2">Quick reactions</p>
+                <div className="flex items-center justify-between gap-1">
+                  {['👍', '❤️', '😂', '😮', '😢', '🔥'].map((emoji) => (
+                    <button key={emoji} type="button" aria-label={`React with ${emoji}`} onClick={() => { onReact(message.id, emoji); setShowActionsMenu(false); }} className="w-10 h-10 md:w-8 md:h-8 rounded-full text-xl md:text-base hover:bg-gray-100 dark:hover:bg-gray-800 active:scale-95">{emoji}</button>
+                  ))}
+                </div>
+              </div>
+              <button type="button" onClick={() => { onReply(message); setShowActionsMenu(false); }} className="w-full px-3 py-3 md:py-2 text-left hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center space-x-3 text-black dark:text-white">
+                <span>↩️</span><span>Reply / Mention this message</span>
+              </button>
+              <button type="button" onClick={() => { setShowMessageInfo(true); setShowActionsMenu(false); }} className="w-full px-3 py-3 md:py-2 text-left hover:bg-gray-100 dark:hover:bg-gray-800 flex items-center space-x-3 text-black dark:text-white">
+                <span>ℹ️</span><span>Message info</span>
+              </button>
               {/* Feature 107 Thread reply */}
               {onOpenThread && (
                 <button
@@ -968,6 +983,39 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 </button>
               )}
             </div>
+          </>
+        )}
+        {showMessageInfo && (
+          <>
+            <div className="fixed inset-0 z-[60] bg-black/45 backdrop-blur-[2px]" onClick={() => setShowMessageInfo(false)} />
+            <section role="dialog" aria-modal="true" aria-label="Message information" className="fixed inset-x-3 bottom-3 z-[61] mx-auto w-auto max-w-md rounded-3xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-[#161B2B] p-5 shadow-2xl pb-[max(1.25rem,env(safe-area-inset-bottom))] md:inset-auto md:left-1/2 md:top-1/2 md:bottom-auto md:w-full md:-translate-x-1/2 md:-translate-y-1/2">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-base font-extrabold text-gray-900 dark:text-white">Message info</h3>
+                <button type="button" onClick={() => setShowMessageInfo(false)} aria-label="Close message info" className="w-9 h-9 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 text-lg">✕</button>
+              </div>
+              <div className="rounded-2xl bg-gray-50 dark:bg-gray-900/60 p-3 mb-4">
+                <p className="text-xs text-gray-700 dark:text-gray-200 whitespace-pre-wrap break-words line-clamp-4">{message.content || (message.media_name ? `📎 ${message.media_name}` : `[${message.message_type}]`)}</p>
+              </div>
+              <div className="space-y-3">
+                <div className="flex items-start gap-3">
+                  <span className="text-lg">✓</span>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-bold text-gray-900 dark:text-white">Sent</p>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">{new Date(message.created_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}</p>
+                  </div>
+                </div>
+                {isMe && (
+                  <div className="flex items-start gap-3">
+                    <span className="text-lg">{message.is_read || message.read_at ? '✓✓' : '✓'}</span>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-bold text-gray-900 dark:text-white">{message.is_read || message.read_at ? 'Seen' : message.delivery_status === 'delivered' ? 'Delivered' : 'Not seen yet'}</p>
+                      <p className="text-xs text-gray-500 dark:text-gray-400">{message.read_at ? new Date(message.read_at).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' }) : message.is_read ? 'Read receipt is available; exact time was not recorded.' : 'The receiver has not opened this message yet, or read receipts are unavailable.'}</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+              <button type="button" onClick={() => setShowMessageInfo(false)} className="mt-5 w-full rounded-xl bg-[#0E2A6E] py-3 text-sm font-bold text-white active:scale-[0.99]">Close</button>
+            </section>
           </>
         )}
       </div>
