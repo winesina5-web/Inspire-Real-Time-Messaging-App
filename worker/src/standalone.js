@@ -81,7 +81,7 @@ export default {
           const text = String(body.message_text || '').trim();
           if (!text) return json({ suggestions: [] }, 200, headers);
           const output = await ask(env, 'Suggest exactly 3 concise, natural replies, each under 8 words. Return only a JSON array of strings.', text, 100);
-          return json({ suggestions: parseJson<string[]>(output, output.split('\n').filter(Boolean).slice(0, 3)) }, 200, headers);
+          return json({ suggestions: parseJson(output, output.split('\n').filter(Boolean).slice(0, 3)) }, 200, headers);
         }
         case '/api/ai/assistant': {
           const messages = Array.isArray(body.messages) ? body.messages.slice(-10) : [];
@@ -112,7 +112,7 @@ export default {
         }
         case '/api/ai/emoji-suggest': {
           const output = await ask(env, 'Suggest up to 5 relevant emoji for this message. Return only a JSON array of emoji strings.', String(body.message_text || ''), 60);
-          return json({ emojis: parseJson<string[]>(output, ['🙂']) }, 200, headers);
+          return json({ emojis: parseJson(output, ['🙂']) }, 200, headers);
         }
         case '/api/ai/tone-check': {
           const output = await ask(env, 'Analyze message tone. Return JSON only with keys tone, suggestion, isPositive (boolean).', String(body.text || ''), 80);
