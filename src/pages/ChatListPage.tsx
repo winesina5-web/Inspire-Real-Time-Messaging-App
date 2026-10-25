@@ -279,7 +279,13 @@ export const ChatListPage: React.FC = () => {
             return timeB - timeA;
           });
 
-          setConversations(conversationList);
+          let secretContactIds: string[] = [];
+          try {
+            secretContactIds = JSON.parse(localStorage.getItem('inspire_vault_secret_contacts_v1') || '[]');
+          } catch {
+            secretContactIds = [];
+          }
+          setConversations(conversationList.filter((conversation) => !secretContactIds.includes(conversation.id)));
         } else {
           setConversations([]);
         }
