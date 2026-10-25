@@ -74,7 +74,14 @@ export default {
     const user = await requireUser(request, env).catch(() => null);
     if (!user?.id) return json({ error: 'Unauthorized: valid Supabase session required' }, 401, headers);
 
-    const body = await request.json().catch(() => ({}));
+    const contentType = request.headers.get('Content-Type') || '';
+    let formData = null;
+    let body = {};
+    if (contentType.toLowerCase().includes('multipart/form-data')) {
+      formData = await request.formData().catch(() => null);
+    } else {
+      body = await request.json().catch(() => ({}));
+    }
     try {
       switch (url.pathname) {
         case '/api/ai/smart-reply': {
@@ -144,27 +151,59 @@ export default {
           const summary = await ask(env, 'Summarize this voice-note transcript in one or two sentences.', String(body.transcript || ''), 100);
           return json({ summary }, 200, headers);
         }
-        case '/api/ai/transcribe': {
-          const key = String(body.object_key || body.media_url || '');
-          if (!key) return json({ error: 'object_key is required' }, 400, headers);
-          const signed = await fetch(`${env.SUPABASE_URL}/storage/v1/object/sign/inspire-media/${key.split('/').map(encodeURIComponent).join('/')}`, {
-            method: 'POST',
-            headers: { apikey: env.SUPABASE_ANON_KEY, Authorization: request.headers.get('Authorization') || '', 'Content-Type': 'application/json' },
-            body: JSON.stringify({ expiresIn: 300 }),
-          });
-          if (!signed.ok) return json({ error: 'Could not access audio media for transcription' }, 403, headers);
-          const signedData = await signed.json();
-          const audioUrl = signedData.signedURL?.startsWith('http') ? signedData.signedURL : `${env.SUPABASE_URL}/storage/v1${signedData.signedURL || ''}`;
-          const audioResponse = await fetch(audioUrl);
-          if (!audioResponse.ok) return json({ error: 'Could not download audio media' }, 502, headers);
-          const audio = new Uint8Array(await audioResponse.arrayBuffer());
-          const result = await env.AI?.run('@cf/openai/whisper-large-v3-turbo', { audio: [...audio] });
-          return json({ transcript: result?.text || result?.transcription || '' }, 200, headers);
+        case '/api/ai/transcribe':
+        case '/api/ai/auto-caption': {
+          const file = formData?.get('file');
+          if (!(file instanceof File)) return json({ error: 'Expected multipart/form-data with a media file.' }, 400, headers);
+          if (file.size > 20 * 1024 * 1024) return json({ error: 'Media exceeds the 20 MB transcription limit.' }, 413, headers);
+          if (!env.AI) return json({ error: 'Workers AI binding is missing.' }, 503, headers);
+          const bytes = new Uint8Array(await file.arrayBuffer());
+          const result = await env.AI.run('@cf/openai/whisper-large-v3-turbo', { audio: Array.from(bytes) });
+          const transcript = String(result?.text || result?.transcription || '').trim();
+          if (url.pathname === '/api/ai/auto-caption') {
+            const safeTranscript = transcript.replace(/-->/g, '—>').replace(/\r?\n/g, ' ').trim();
+            const vtt = safeTranscript ? `WEBVTT\\n\\n00:00:00.000 --> 00:00:30.000\\n${safeTranscript}\\n` : 'WEBVTT\\n';
+            return json({ vtt, transcript }, 200, headers);
+          }
+          return json({ transcript }, 200, headers);
         }
         case '/api/ai/image-enhance':
         case '/api/image/enhance': {
           return json({ error: 'Image enhancement model is not enabled for this account yet.' }, 501, headers);
         }
+        case '/api/export/chat': {
+          const partnerId = String(body.partner_id || '');
+          if (!partnerId) return json({ error: 'partner_id is required' }, 400, headers);
+          const query = new URLSearchParams({
+            select: 'created_at,sender_id,content,message_type,media_name',
+            or: `and(sender_id.eq.${user.id},receiver_id.eq.${partnerId}),and(sender_id.eq.${partnerId},receiver_id.eq.${user.id})`,
+            order: 'created_at.asc',
+          });
+          const response = await fetch(`${env.SUPABASE_URL}/rest/v1/messages?${query.toString()}`, {
+            headers: { apikey: env.SUPABASE_ANON_KEY, Authorization: request.headers.get('Authorization') || '', Accept: 'application/json' },
+          });
+          if (!response.ok) return json({ error: 'Could not export this conversation.' }, 502, headers);
+          const messages = await response.json();
+          const output = body.format === 'json' ? JSON.stringify(messages, null, 2) : messages.map((message) => `[${message.created_at}] ${message.sender_id === user.id ? 'You' : 'Contact'}: ${message.content || `[${message.message_type || 'media'}: ${message.media_name || ''}]`}`).join('\\n');
+          const bytes = new TextEncoder().encode(output);
+          let binary = '';
+          for (const byte of bytes) binary += String.fromCharCode(byte);
+          const mime = body.format === 'json' ? 'application/json' : 'text/plain';
+          return json({ download_url: `data:${mime};base64,${btoa(binary)}` }, 200, headers);
+        }
+        case '/api/appeals/submit': {
+          const actionType = String(body.action_type || '').slice(0, 100);
+          const reason = String(body.reason || '').trim().slice(0, 2000);
+          if (!actionType || !reason) return json({ error: 'Action type and reason are required.' }, 400, headers);
+          const response = await fetch(`${env.SUPABASE_URL}/rest/v1/moderation_appeals`, {
+            method: 'POST',
+            headers: { apikey: env.SUPABASE_ANON_KEY, Authorization: request.headers.get('Authorization') || '', 'Content-Type': 'application/json', Prefer: 'return=minimal' },
+            body: JSON.stringify({ user_id: user.id, action_type: actionType, reason, status: 'open' }),
+          });
+          return response.ok ? json({ success: true }, 200, headers) : json({ error: 'Could not submit appeal.' }, 502, headers);
+        }
+        case '/api/export/compliance-report':
+          return json({ error: 'Compliance report export is not implemented yet.' }, 501, headers);
         case '/api/calls/turn-credentials':
           return json({ iceServers: [{ urls: 'stun:stun.cloudflare.com:3478' }, { urls: 'stun:stun.l.google.com:19302' }] }, 200, headers);
         case '/api/link-preview':
