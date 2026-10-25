@@ -685,7 +685,7 @@ export const GroupChatPage: React.FC = () => {
         <GroupMembersPanel
           groupId={groupId}
           currentUserId={user.id}
-          currentRole={group.role}
+          currentRole={group.role || 'member'}
           onClose={() => setShowMembersPanel(false)}
           onMembershipChanged={handleMembershipCountChanged}
         />
