@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { useToast } from '../components/Toast';
@@ -38,6 +38,9 @@ export const GroupChatPage: React.FC = () => {
   const groupAICharactersRef = useRef<GroupAICharacter[]>([]);
   const messagesRef = useRef<Message[]>([]);
   const processingGroupMessageIdsRef = useRef<Set<string>>(new Set());
+  const handleMembershipCountChanged = useCallback((count: number) => {
+    setGroup((current) => current ? { ...current, members_count: count } : current);
+  }, []);
 
   // Group Slow Mode (Feature 113)
   const [slowModeSeconds, setSlowModeSeconds] = useState(0);
@@ -684,7 +687,7 @@ export const GroupChatPage: React.FC = () => {
           currentUserId={user.id}
           currentRole={group.role}
           onClose={() => setShowMembersPanel(false)}
-          onMembershipChanged={(count) => setGroup((current) => current ? { ...current, members_count: count } : current)}
+          onMembershipChanged={handleMembershipCountChanged}
         />
       )}
 
