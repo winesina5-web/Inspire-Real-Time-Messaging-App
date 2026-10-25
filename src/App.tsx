@@ -12,6 +12,7 @@ import { ChooseUsernamePage } from './pages/ChooseUsernamePage';
 import { ChatListPage } from './pages/ChatListPage';
 import { ChatPage } from './pages/ChatPage';
 import { ProfilePage } from './pages/ProfilePage';
+import { BlockedUsersPage } from './pages/BlockedUsersPage';
 
 import { CallsPage } from './pages/CallsPage';
 import { StatusPage } from './pages/StatusPage';
@@ -282,6 +283,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <PrivacySettingsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/blocked-users"
+        element={
+          <ProtectedRoute>
+            <BlockedUsersPage />
           </ProtectedRoute>
         }
       />
