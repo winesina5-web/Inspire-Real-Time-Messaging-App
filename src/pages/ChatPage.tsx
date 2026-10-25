@@ -1636,7 +1636,7 @@ export const ChatPage: React.FC = () => {
                 {sharedMedia.length === 0 ? <p className="py-4 text-xs text-gray-500">No shared media yet.</p> : (
                   <div className="mt-2 space-y-1">
                     {sharedMedia.slice(-30).reverse().map((item) => (
-                      <button key={item.id} type="button" onClick={async () => { const url = item.media_url?.startsWith('http') ? item.media_url : await workerApi.getDownloadUrl(item.media_url || ''); if (url) window.open(url, '_blank', 'noopener,noreferrer'); else toast('This media could not be opened.', 'error'); }} className="w-full flex items-center gap-2 rounded-lg px-2 py-2 text-left hover:bg-gray-100 dark:hover:bg-gray-800">
+                      <button key={item.id} type="button" onClick={async () => { const url = item.media_url && item.media_url.startsWith('http') ? item.media_url : await workerApi.getDownloadUrl(item.media_url || ''); if (url) window.open(url, '_blank', 'noopener,noreferrer'); else toast('This media could not be opened.', 'error'); }} className="w-full flex items-center gap-2 rounded-lg px-2 py-2 text-left hover:bg-gray-100 dark:hover:bg-gray-800">
                         <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#FFD700] text-[#1A1A2E]">{item.message_type === 'image' ? <ImageIcon size={16} /> : <FileAudio size={16} />}</span>
                         <span className="min-w-0 flex-1"><span className="block truncate text-xs font-semibold">{item.media_name || item.message_type.replace('_', ' ')}</span><span className="block text-[10px] text-gray-500">{new Date(item.created_at).toLocaleDateString()}</span></span>
                       </button>
