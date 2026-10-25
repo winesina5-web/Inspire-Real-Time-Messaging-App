@@ -161,8 +161,8 @@ export const SecretChatsPage: React.FC = () => {
                 {contacts.map((contact) => {
                   const selected = secretIds.includes(contact.id);
                   return <div key={contact.id} className="flex items-center gap-3 p-3 rounded-2xl border border-gray-200 dark:border-gray-800">
-                    <Avatar name={contact.display_name || contact.username} avatarUrl={contact.avatar_url || undefined} size="md" />
-                    <div className="min-w-0 flex-1"><p className="text-sm font-bold truncate">{contact.display_name || contact.username}</p><p className="text-xs text-gray-500">@{contact.username}</p></div>
+                    <Avatar name={contact.display_name || contact.username || 'User'} avatarUrl={contact.avatar_url || undefined} size="md" />
+                    <div className="min-w-0 flex-1"><p className="text-sm font-bold truncate">{contact.display_name || contact.username || 'User'}</p><p className="text-xs text-gray-500">@{contact.username || 'unknown'}</p></div>
                     <button onClick={() => toggleSecret(contact.id)} className={`px-3 py-2 rounded-xl text-xs font-bold ${selected ? 'bg-amber-100 text-amber-900' : 'bg-gray-100 dark:bg-gray-800'}`}>{selected ? 'Remove' : 'Add to vault'}</button>
                     {selected && <button onClick={() => navigate(`/chat/${contact.id}`)} className="px-3 py-2 rounded-xl bg-[#0E2A6E] text-white text-xs font-bold">Open</button>}
                   </div>;
