@@ -29,7 +29,9 @@ export const CallModal: React.FC<CallModalProps> = ({ callId, partner, type, isC
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const channelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
   const processedSignalsRef = useRef<Set<string>>(new Set());
+  const processingSignalsRef = useRef<Set<string>>(new Set());
   const pendingCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
+  const offerSentRef = useRef(false);
   const endedRef = useRef(false);
 
   useEffect(() => {
@@ -60,10 +62,11 @@ export const CallModal: React.FC<CallModalProps> = ({ callId, partner, type, isC
     };
 
     const processSignal = async (signal: any) => {
-      if (!mounted || !signal?.id || processedSignalsRef.current.has(signal.id) || signal.sender_id === user.id) return;
-      processedSignalsRef.current.add(signal.id);
+      if (!mounted || !signal?.id || signal.call_id !== callId || signal.receiver_id !== user.id ||
+          processedSignalsRef.current.has(signal.id) || processingSignalsRef.current.has(signal.id) || signal.sender_id === user.id) return;
       const pc = peerConnectionRef.current;
       if (!pc || pc.signalingState === 'closed') return;
+      processingSignalsRef.current.add(signal.id);
       try {
         if (signal.event_type === 'offer' && !isCaller) {
           await pc.setRemoteDescription(new RTCSessionDescription(signal.payload.sdp));
@@ -89,12 +92,15 @@ export const CallModal: React.FC<CallModalProps> = ({ callId, partner, type, isC
           setCallStatus('ended');
           onEndCall(duration);
         }
+        processedSignalsRef.current.add(signal.id);
       } catch (error) {
         console.warn('Call signaling error:', error);
         if (mounted) {
           setCallStatus('error');
           setErrorMessage(error instanceof Error ? error.message : 'Call signaling failed.');
         }
+      } finally {
+        processingSignalsRef.current.delete(signal.id);
       }
     };
 
@@ -144,10 +150,11 @@ export const CallModal: React.FC<CallModalProps> = ({ callId, partner, type, isC
             if (!error && data) {
               for (const signal of data) await processSignal(signal);
             }
-            if (isCaller && !endedRef.current && pc.signalingState === 'stable') {
+            if (isCaller && !offerSentRef.current && !endedRef.current && pc.signalingState === 'stable') {
               const offer = await pc.createOffer();
               await pc.setLocalDescription(offer);
               await sendSignal('offer', { sdp: pc.localDescription });
+              offerSentRef.current = true;
             }
           });
         channelRef.current = channel;
