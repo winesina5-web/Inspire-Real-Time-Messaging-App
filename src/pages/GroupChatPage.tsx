@@ -20,6 +20,8 @@ export const GroupChatPage: React.FC = () => {
   const [group, setGroup] = useState<Group | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [hasMoreMessages, setHasMoreMessages] = useState(false);
   const [inputText, setInputText] = useState('');
   const [showPollModal, setShowPollModal] = useState(false);
   const [showInfoModal, setShowInfoModal] = useState(false);
@@ -32,10 +34,17 @@ export const GroupChatPage: React.FC = () => {
   const [cooldownRemaining, setCooldownRemaining] = useState(0);
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+  const lastMessageIdRef = useRef<string | null>(null);
 
+  // Only auto-scroll when the newest message changes. Prepending older history
+  // must not yank the reader back to the bottom.
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages.length]);
+    const newestId = messages[messages.length - 1]?.id || null;
+    if (newestId && newestId !== lastMessageIdRef.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
+    lastMessageIdRef.current = newestId;
+  }, [messages]);
 
   useEffect(() => {
     if (cooldownRemaining <= 0) return;
@@ -96,7 +105,7 @@ export const GroupChatPage: React.FC = () => {
             slow_mode_interval: interval,
           });
 
-          // Fetch group messages
+          // Fetch the newest page first so large groups don't download their full history.
           const { data: msgRows, error: msgErr } = await supabase
             .from('group_messages')
             .select(`
@@ -115,11 +124,12 @@ export const GroupChatPage: React.FC = () => {
               thread_reply_count
             `)
             .eq('group_id', groupId)
-            .order('created_at', { ascending: true });
+            .order('created_at', { ascending: false })
+            .limit(100);
 
           if (!msgErr && msgRows) {
-            setMessages(
-              msgRows.map((m: any) => ({
+            setHasMoreMessages(msgRows.length === 100);
+            const latestMessages = msgRows.slice().reverse().map((m: any) => ({
                 id: m.id,
                 sender_id: m.sender_id,
                 group_id: m.group_id,
@@ -137,8 +147,13 @@ export const GroupChatPage: React.FC = () => {
                 edited_at: m.edited_at,
                 thread_reply_count: m.thread_reply_count || 0,
                 reactions: [],
-              }))
-            );
+              }));
+            // Preserve realtime messages that may arrive while the initial query is in flight.
+            setMessages((current) => {
+              const byId = new Map(current.map((message) => [message.id, message]));
+              latestMessages.forEach((message) => byId.set(message.id, message));
+              return Array.from(byId.values()).sort((a, b) => a.created_at.localeCompare(b.created_at));
+            });
           }
         } catch (err) {
           console.warn('Group load error:', err);
@@ -212,6 +227,56 @@ export const GroupChatPage: React.FC = () => {
       }
     };
   }, [groupId, user]);
+
+  const loadOlderMessages = async () => {
+    if (!isConfigured || !groupId || loadingOlder || !hasMoreMessages || messages.length === 0) return;
+    const oldest = messages[0];
+    setLoadingOlder(true);
+    try {
+      const { data, error } = await supabase
+        .from('group_messages')
+        .select(`
+          id, sender_id, group_id, content, message_type, media_url,
+          media_size, media_name, reply_to_id, is_deleted, created_at,
+          edited_at, thread_reply_count
+        `)
+        .eq('group_id', groupId)
+        .lt('created_at', oldest.created_at)
+        .order('created_at', { ascending: false })
+        .limit(100);
+      if (error) throw error;
+      const older = (data || []).slice().reverse().map((m: any) => ({
+        id: m.id,
+        sender_id: m.sender_id,
+        group_id: m.group_id,
+        content: m.content,
+        message_type: m.message_type,
+        media_url: m.media_url,
+        media_size: m.media_size,
+        media_name: m.media_name,
+        reply_to_id: m.reply_to_id,
+        is_deleted_sender: m.is_deleted,
+        is_deleted_receiver: m.is_deleted,
+        is_read: true,
+        read_at: null,
+        created_at: m.created_at,
+        edited_at: m.edited_at,
+        thread_reply_count: m.thread_reply_count || 0,
+        reactions: [],
+      }));
+      setHasMoreMessages((data || []).length === 100);
+      setMessages((current) => {
+        const seen = new Set(current.map((message) => message.id));
+        return [...older.filter((message) => !seen.has(message.id)), ...current]
+          .sort((a, b) => a.created_at.localeCompare(b.created_at));
+      });
+    } catch (error) {
+      console.warn('Failed to load older group messages:', error);
+      toast('Could not load older messages. Please try again.', 'error');
+    } finally {
+      setLoadingOlder(false);
+    }
+  };
 
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -374,6 +439,18 @@ export const GroupChatPage: React.FC = () => {
 
       {/* Message Feed */}
       <main className="flex-1 max-w-2xl mx-auto w-full p-4 overflow-y-auto space-y-3">
+        {hasMoreMessages && (
+          <div className="flex justify-center py-2">
+            <button
+              type="button"
+              onClick={loadOlderMessages}
+              disabled={loadingOlder}
+              className="rounded-full border border-gray-200 dark:border-gray-700 px-4 py-2 text-xs font-semibold text-gray-600 dark:text-gray-300 disabled:opacity-50"
+            >
+              {loadingOlder ? 'Loading older messages…' : 'Load older messages'}
+            </button>
+          </div>
+        )}
         {messages.length === 0 ? (
           <div className="text-center py-20 text-gray-400 text-xs space-y-2">
             <div className="text-4xl">💬</div>
