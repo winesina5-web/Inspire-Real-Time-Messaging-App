@@ -404,6 +404,8 @@ export function useMessages(partnerId: string) {
   const addReaction = async (messageId: string, emoji: string) => {
     if (!user) return;
 
+    const current = messagesRef.current.find((m) => m.id === messageId)?.reactions?.find((r) => r.user_id === user.id);
+    const shouldRemove = current?.emoji === emoji;
     const newReaction: Reaction = {
       id: `rx_${Date.now()}`,
       message_id: messageId,
@@ -412,23 +414,24 @@ export function useMessages(partnerId: string) {
       created_at: new Date().toISOString(),
     };
 
-    setMessages((prev) =>
-      prev.map((m) => {
-        if (m.id === messageId) {
-          const filtered = (m.reactions || []).filter((r) => r.user_id !== user.id);
-          return { ...m, reactions: [...filtered, newReaction] };
-        }
-        return m;
-      })
-    );
+    setMessages((prev) => prev.map((m) => {
+      if (m.id !== messageId) return m;
+      const filtered = (m.reactions || []).filter((r) => r.user_id !== user.id);
+      return { ...m, reactions: shouldRemove ? filtered : [...filtered, newReaction] };
+    }));
 
     if (isConfigured) {
       try {
-        await supabase
-          .from('reactions')
-          .upsert({ message_id: messageId, user_id: user.id, emoji });
+        if (shouldRemove) {
+          const { error } = await supabase.from('reactions').delete().eq('message_id', messageId).eq('user_id', user.id);
+          if (error) throw error;
+        } else {
+          const { error } = await supabase.from('reactions').upsert({ message_id: messageId, user_id: user.id, emoji });
+          if (error) throw error;
+        }
       } catch (err) {
-        console.warn('Reaction upsert error:', err);
+        console.warn('Reaction toggle error:', err);
+        await loadMessages();
       }
     }
   };

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './hooks/useAuth';
+import { supabase, isConfigured } from './lib/supabaseClient';
 import { ToastProvider } from './components/Toast';
 import { InstallPrompt } from './components/InstallPrompt';
 import { IncomingCallListener } from './components/IncomingCallListener';
@@ -506,6 +507,44 @@ function AccentThemeSync() {
   return null;
 }
 
+function IncomingMessageNotifications() {
+  const { user } = useAuth();
+  useEffect(() => {
+    if (!user || !isConfigured) return;
+    const channel = supabase.channel(`system-message-notifications-${user.id}`)
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'messages',
+        filter: `receiver_id=eq.${user.id}`,
+      }, async (payload: any) => {
+        const message = payload.new as { id?: string; sender_id?: string; receiver_id?: string; content?: string | null; message_type?: string; is_deleted_receiver?: boolean };
+        if (!message.sender_id || message.receiver_id !== user.id || message.is_deleted_receiver) return;
+        if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+        const body = message.message_type === 'image' ? 'Photo' : message.message_type === 'voice_note' ? 'Voice message' : message.message_type === 'video' ? 'Video message' : (message.content || 'You received a message').slice(0, 140);
+        try {
+          const registration = await navigator.serviceWorker?.ready;
+          if (registration) {
+            await registration.showNotification('New message', {
+              body,
+              icon: '/icon-192.svg',
+              badge: '/icon-192.svg',
+              tag: `inspire-message-${message.id || Date.now()}`,
+              data: { url: `/chat/${message.sender_id}` },
+            });
+          } else {
+            new Notification('New message', { body });
+          }
+        } catch (error) {
+          console.warn('System notification failed:', error);
+        }
+      })
+      .subscribe();
+    return () => { void supabase.removeChannel(channel); };
+  }, [user]);
+  return null;
+}
+
 export default function App() {
   // Sync Dark/Light Mode on startup
   useEffect(() => {
@@ -530,6 +569,7 @@ export default function App() {
         <AuthProvider>
           <AccentThemeSync />
           <ImpersonationBanner />
+          <IncomingMessageNotifications />
           <AppRoutes />
           <InstallPrompt />
           <PrivacyConsentBanner />

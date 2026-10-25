@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { Bell } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { usePresence } from '../hooks/usePresence';
 import { useToast } from '../components/Toast';
@@ -106,6 +107,8 @@ export const ChatListPage: React.FC = () => {
     ];
   });
   const [isLoading, setIsLoading] = useState(true);
+  const [statusUserIds, setStatusUserIds] = useState<Set<string>>(() => new Set());
+  const [notificationPermission, setNotificationPermission] = useState<NotificationPermission>(() => typeof Notification === 'undefined' ? 'denied' : Notification.permission);
 
   // Add Contact & Group Modal State
   const [showAddModal, setShowAddModal] = useState(false);
@@ -323,6 +326,35 @@ export const ChatListPage: React.FC = () => {
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    if (!isConfigured || !user) return;
+    const ids = Array.from(new Set([...conversations.map((c) => c.id), ...contacts.map((c) => c.id)]));
+    if (!ids.length) { setStatusUserIds(new Set()); return; }
+    let cancelled = false;
+    supabase.from('statuses').select('user_id').in('user_id', ids).gt('expires_at', new Date().toISOString())
+      .then(({ data, error }) => {
+        if (cancelled) return;
+        if (error) { console.warn('Could not load contact status rings:', error.message); return; }
+        setStatusUserIds(new Set((data || []).map((row: { user_id: string }) => row.user_id)));
+      });
+    return () => { cancelled = true; };
+  }, [user, conversations, contacts]);
+
+  const enableNotifications = async () => {
+    if (!('Notification' in window)) {
+      toast('This browser does not support system notifications.', 'error');
+      return;
+    }
+    try {
+      const permission = await Notification.requestPermission();
+      setNotificationPermission(permission);
+      if (permission === 'granted') toast('Message notifications enabled on this device.', 'success');
+      else toast('Notifications are blocked in browser settings.', 'info');
+    } catch {
+      toast('Could not enable notifications on this device.', 'error');
+    }
+  };
 
   const handlePullRefresh = async () => {
     setIsRefreshing(true);
@@ -650,6 +682,17 @@ export const ChatListPage: React.FC = () => {
             >
               🔄
             </button>
+            {notificationPermission !== 'granted' && (
+              <button
+                type="button"
+                onClick={enableNotifications}
+                title="Enable message notifications"
+                aria-label="Enable message notifications"
+                className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-600 dark:text-gray-200 transition-colors"
+              >
+                <Bell size={17} strokeWidth={2} />
+              </button>
+            )}
             <button
               onClick={() => {
                 const isDark = document.documentElement.classList.toggle('dark');
@@ -906,7 +949,16 @@ export const ChatListPage: React.FC = () => {
                           onKeyDown={(e) => e.key === 'Enter' && navigate(`/chat/${partner.id}`)}
                           className="flex items-center space-x-3.5 py-3 px-2 rounded-2xl hover:bg-gray-50 dark:hover:bg-gray-900/50 cursor-pointer transition-colors"
                         >
-                          <div className="relative">
+                          <div className="relative shrink-0">
+                            {statusUserIds.has(partner.id) && (
+                              <button
+                                type="button"
+                                aria-label={`View ${partner.display_name || 'contact'} status`}
+                                title="View status"
+                                onClick={(e) => { e.stopPropagation(); navigate('/status'); }}
+                                className="absolute -inset-[3px] z-10 rounded-full border-[2.5px] border-emerald-500 p-[2px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
+                              />
+                            )}
                             <Avatar
                               name={partner.display_name || partner.username || 'User'}
                               avatarUrl={partner.avatar_url}
