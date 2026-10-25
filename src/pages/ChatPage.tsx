@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { Phone, Video, MoreVertical, Search, Paperclip, Mic, Send, X, Image as ImageIcon, FileAudio } from 'lucide-react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { useMessages } from '../hooks/useMessages';
