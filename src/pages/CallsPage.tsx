@@ -119,6 +119,17 @@ export const CallsPage: React.FC = () => {
     setActiveCall({ partner, type, callId: data.id });
   };
 
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const requestedContact = params.get('contact');
+    const requestedMode = params.get('mode');
+    if (!requestedContact || (requestedMode !== 'voice' && requestedMode !== 'video') || !contacts.length) return;
+    const partner = contacts.find((contact) => contact.id === requestedContact);
+    window.history.replaceState({}, '', window.location.pathname);
+    if (partner) void handleStartCall(partner, requestedMode);
+    else toast('This contact is not available in your contacts yet.', 'error');
+  }, [contacts]);
+
   const handleEndCall = async (duration: number) => {
     if (activeCall) {
       const status = duration > 0 ? 'answered' : 'missed';
