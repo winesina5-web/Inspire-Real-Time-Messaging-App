@@ -64,7 +64,7 @@ function parseJson(text, fallback) {
 }
 
 export default {
-  async fetch(request, env): Promise<Response> {
+  async fetch(request, env) {
     const headers = cors(request, env);
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers });
     const url = new URL(request.url);
@@ -153,7 +153,7 @@ export default {
             body: JSON.stringify({ expiresIn: 300 }),
           });
           if (!signed.ok) return json({ error: 'Could not access audio media for transcription' }, 403, headers);
-          const signedData = await signed.json() as { signedURL? };
+          const signedData = await signed.json();
           const audioUrl = signedData.signedURL?.startsWith('http') ? signedData.signedURL : `${env.SUPABASE_URL}/storage/v1${signedData.signedURL || ''}`;
           const audioResponse = await fetch(audioUrl);
           if (!audioResponse.ok) return json({ error: 'Could not download audio media' }, 502, headers);
