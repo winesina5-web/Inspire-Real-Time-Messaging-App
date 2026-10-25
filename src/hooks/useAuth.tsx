@@ -216,19 +216,22 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return { error: new Error('Unauthorized role modification attempt.') };
     }
 
-    const updated = { ...user, ...updates };
-    setUser(updated);
-
     if (isConfigured) {
       try {
-        const { error } = await supabase
+        const { data, error } = await supabase
           .from('profiles')
           .update(updates)
-          .eq('id', user.id);
+          .eq('id', user.id)
+          .select('*')
+          .maybeSingle();
         if (error) return { error };
+        if (!data) return { error: new Error('Profile was not updated. Check your profile permissions and try again.') };
+        setUser({ ...user, ...data } as Profile);
       } catch (err) {
         return { error: err as Error };
       }
+    } else {
+      setUser({ ...user, ...updates });
     }
 
     return { error: null };

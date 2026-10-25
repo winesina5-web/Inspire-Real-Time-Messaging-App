@@ -518,8 +518,8 @@ export const ChatPage: React.FC = () => {
       } else {
         toast('Media uploaded, but message delivery failed. Please retry.', 'error');
       }
-    } else if (uploadError) {
-      toast(uploadError, 'error');
+    } else {
+      toast(uploadError || 'Media upload failed. Please check the file size, connection and Storage permissions.', 'error');
     }
 
     if (fileInputRef.current) fileInputRef.current.value = '';
@@ -1091,7 +1091,7 @@ export const ChatPage: React.FC = () => {
       <main
         ref={chatScrollContainerRef}
         onScroll={handleScroll}
-        className={`flex-1 overflow-y-auto px-4 py-3 space-y-1 relative transition-colors ${
+        className={`flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y px-4 py-3 space-y-1 relative transition-colors ${
           wallpaperClasses[wallpaperPreset] || wallpaperClasses.default
         }`}
       >

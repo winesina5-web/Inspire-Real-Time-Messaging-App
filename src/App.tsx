@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from
 import { AuthProvider, useAuth } from './hooks/useAuth';
 import { ToastProvider } from './components/Toast';
 import { InstallPrompt } from './components/InstallPrompt';
+import { IncomingCallListener } from './components/IncomingCallListener';
 
 import { LoginPage } from './pages/LoginPage';
 import { SignupPage } from './pages/SignupPage';
@@ -12,6 +13,7 @@ import { ChooseUsernamePage } from './pages/ChooseUsernamePage';
 import { ChatListPage } from './pages/ChatListPage';
 import { ChatPage } from './pages/ChatPage';
 import { ProfilePage } from './pages/ProfilePage';
+import { BlockedUsersPage } from './pages/BlockedUsersPage';
 
 import { CallsPage } from './pages/CallsPage';
 import { StatusPage } from './pages/StatusPage';
@@ -174,7 +176,8 @@ function AppRoutes() {
   }
 
   return (
-    <Routes>
+    <>
+      <Routes>
       {/* Guest Authentication Routes */}
       <Route
         path="/login"
@@ -282,6 +285,14 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <PrivacySettingsPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/blocked-users"
+        element={
+          <ProtectedRoute>
+            <BlockedUsersPage />
           </ProtectedRoute>
         }
       />
@@ -420,7 +431,9 @@ function AppRoutes() {
 
       {/* Catch-all redirect */}
       <Route path="*" element={<Navigate to="/chats" replace />} />
-    </Routes>
+      </Routes>
+      <IncomingCallListener />
+    </>
   );
 }
 

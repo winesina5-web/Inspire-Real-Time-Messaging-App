@@ -45,9 +45,12 @@ export const workerApi = {
     const extension = originalName.includes('.')
       ? (originalName.split('.').pop() || 'bin').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 10) || 'bin'
       : 'bin';
+    const randomId = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `${Date.now().toString(36)}-${Array.from(crypto.getRandomValues(new Uint8Array(16))).map((byte) => byte.toString(16).padStart(2, '0')).join('')}`;
     const objectKey = messageType === 'avatar'
       ? `${user.id}/avatar.${extension}`
-      : `${user.id}/${crypto.randomUUID()}.${extension}`;
+      : `${user.id}/${randomId}.${extension}`;
     const contentType = file.type || 'application/octet-stream';
     const { data, error } = await supabase.storage.from('inspire-media').upload(objectKey, file, {
       contentType, cacheControl: '3600', upsert: messageType === 'avatar',

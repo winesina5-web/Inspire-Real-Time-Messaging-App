@@ -18,7 +18,7 @@ export const CallsPage: React.FC = () => {
   const [contacts, setContacts] = useState<Profile[]>([]);
   const [loading, setLoading] = useState(true);
   const [showContactPicker, setShowContactPicker] = useState(false);
-  const [activeCall, setActiveCall] = useState<{ partner: Profile; type: 'voice' | 'video' } | null>(null);
+  const [activeCall, setActiveCall] = useState<{ partner: Profile; type: 'voice' | 'video'; callId: string } | null>(null);
 
   // Load real call history from Supabase calls table
   useEffect(() => {
@@ -98,52 +98,49 @@ export const CallsPage: React.FC = () => {
     loadCallsAndContacts();
   }, [user]);
 
-  const handleStartCall = (partner: Profile, type: 'voice' | 'video') => {
+  const handleStartCall = async (partner: Profile, type: 'voice' | 'video') => {
     setShowContactPicker(false);
-    setActiveCall({ partner, type });
+    if (!user || !isConfigured) {
+      toast('Calls require a configured Supabase account.', 'error');
+      return;
+    }
+    const { data, error } = await supabase.from('calls').insert({
+      caller_id: user.id,
+      callee_id: partner.id,
+      type,
+      status: 'ringing',
+      started_at: new Date().toISOString(),
+    }).select('*').single();
+    if (error || !data) {
+      console.warn('Could not start call:', error);
+      toast(error?.message || 'Could not start call.', 'error');
+      return;
+    }
+    setActiveCall({ partner, type, callId: data.id });
   };
 
   const handleEndCall = async (duration: number) => {
-    if (activeCall && user) {
-      const callData = {
-        caller_id: user.id,
-        callee_id: activeCall.partner.id,
-        type: activeCall.type,
-        status: duration > 0 ? 'answered' : 'missed',
-        duration_seconds: duration,
-        started_at: new Date().toISOString(),
-      };
-
+    if (activeCall) {
+      const status = duration > 0 ? 'answered' : 'missed';
       if (isConfigured) {
-        try {
-          const { data, error } = await supabase
-            .from('calls')
-            .insert(callData)
-            .select()
-            .single();
-
-          if (!error && data) {
-            const newRecord: CallRecord = {
-              id: data.id,
-              ...callData,
-              status: callData.status as 'answered' | 'missed' | 'declined',
-              partner: activeCall.partner,
-            };
-            setCalls((prev) => [newRecord, ...prev]);
-          }
-        } catch (err) {
-          console.warn('Failed to persist call record:', err);
-        }
-      } else {
-        const localRecord: CallRecord = {
-          id: `call_${Date.now()}`,
-          ...callData,
-          status: callData.status as 'answered' | 'missed' | 'declined',
+        const { error } = await supabase.from('calls').update({
+          status,
+          ended_at: new Date().toISOString(),
+          duration_seconds: duration,
+        }).eq('id', activeCall.callId);
+        if (error) console.warn('Could not update call record:', error);
+        const newRecord: CallRecord = {
+          id: activeCall.callId,
+          caller_id: user?.id || '',
+          callee_id: activeCall.partner.id,
+          type: activeCall.type,
+          status: status as 'answered' | 'missed' | 'declined',
+          started_at: new Date().toISOString(),
+          duration_seconds: duration,
           partner: activeCall.partner,
         };
-        setCalls((prev) => [localRecord, ...prev]);
+        setCalls((prev) => [newRecord, ...prev.filter((call) => call.id !== activeCall.callId)]);
       }
-
       toast(`Call ended (${formatDuration(duration)})`, 'info');
     }
     setActiveCall(null);
@@ -303,8 +300,10 @@ export const CallsPage: React.FC = () => {
       {/* Active WebRTC Call Screen Modal */}
       {activeCall && (
         <CallModal
+          callId={activeCall.callId}
           partner={activeCall.partner}
           type={activeCall.type}
+          isCaller={true}
           onEndCall={handleEndCall}
         />
       )}

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Message, PollData, GameData, PaymentSplit, GroupEvent, MusicCardData } from '../types';
 import {
   isMessageDeletedForViewer,
@@ -63,7 +63,11 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const isDeleted = isMessageDeletedForViewer(message, currentUserId);
   const [showReactionsPicker, setShowReactionsPicker] = useState(false);
   const [showActionsMenu, setShowActionsMenu] = useState(false);
-  const [resolvedMediaUrl, setResolvedMediaUrl] = useState<string>(message.media_url || '');
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const touchMovedRef = useRef(false);
+  const clearLongPress = () => { if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current); longPressTimerRef.current = null; };
+  const [resolvedMediaUrl, setResolvedMediaUrl] = useState<string>('');
+  const [mediaResolveError, setMediaResolveError] = useState(false);
   const [transcript, setTranscript] = useState<string | null>(null);
   const [isTranscribing, setIsTranscribing] = useState(false);
   const [voiceSummary, setVoiceSummary] = useState<string | null>(message.ai_voice_summary || null);
@@ -81,12 +85,22 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
 
   useEffect(() => {
     let isMounted = true;
+    setResolvedMediaUrl('');
+    setMediaResolveError(false);
     if (message.media_url && !message.media_url.startsWith('http') && !message.media_url.startsWith('data:')) {
       workerApi.getDownloadUrl(message.media_url).then((url) => {
-        if (isMounted) setResolvedMediaUrl(url);
+        if (isMounted) {
+          setResolvedMediaUrl(url);
+          setMediaResolveError(!url);
+        }
+      }).catch((error) => {
+        console.warn('Private media URL resolution failed:', error);
+        if (isMounted) setMediaResolveError(true);
       });
     } else if (message.media_url) {
       setResolvedMediaUrl(message.media_url);
+    } else if (['image', 'video', 'audio', 'voice_note', 'file'].includes(message.message_type)) {
+      setMediaResolveError(true);
     }
 
     // Check for link preview
@@ -217,7 +231,18 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   });
 
   return (
-    <div className={`group relative flex w-full my-1.5 ${isMe ? 'justify-end' : 'justify-start'}`}>
+    <div
+      className={`group relative flex w-full my-1.5 ${isMe ? 'justify-end' : 'justify-start'}`}
+      onContextMenu={(event) => { event.preventDefault(); setShowActionsMenu(true); }}
+      onTouchStart={() => {
+        touchMovedRef.current = false;
+        clearLongPress();
+        longPressTimerRef.current = setTimeout(() => setShowActionsMenu(true), 500);
+      }}
+      onTouchMove={() => { touchMovedRef.current = true; clearLongPress(); }}
+      onTouchEnd={clearLongPress}
+      onTouchCancel={clearLongPress}
+    >
       <div className="relative max-w-[85%] sm:max-w-[75%] flex flex-col">
         {/* Feature 125: Anonymous Message Header */}
         {message.is_anonymous && (
@@ -684,6 +709,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               <span>{message.thread_reply_count} {message.thread_reply_count === 1 ? 'reply' : 'replies'}</span>
               <span>→</span>
             </button>
+          )}
+
+          {mediaResolveError && ['image', 'video', 'audio', 'voice_note', 'file'].includes(message.message_type) && (
+            <div role="status" className="mb-2 rounded-xl border border-rose-300/60 bg-rose-50/80 dark:bg-rose-950/30 px-3 py-2 text-[11px] text-rose-700 dark:text-rose-200">
+              Media is unavailable. Check access permissions or ask the sender to resend the file.
+            </div>
           )}
 
           {/* Footer Metadata: Status indicators (Feature 127), Star, Timestamp & Ticks */}

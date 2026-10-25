@@ -190,6 +190,24 @@ export const ChatListPage: React.FC = () => {
         .filter((profile): profile is Profile => Boolean(profile));
       setContacts(loadedContacts);
 
+      // Load real groups for this user instead of leaving demo groups in the production UI.
+      const { data: memberships, error: membershipsError } = await supabase
+        .from('group_members')
+        .select('group_id, role, group:group_id(*)')
+        .eq('user_id', user.id);
+      if (membershipsError) {
+        console.warn('Load group memberships failed:', membershipsError);
+      } else {
+        const realGroups = (memberships || [])
+          .map((row: any) => {
+            const group = Array.isArray(row.group) ? row.group[0] : row.group;
+            if (!group) return null;
+            return { ...group, role: row.role, members_count: group.max_members || 1 } as Group;
+          })
+          .filter((group: Group | null): group is Group => Boolean(group));
+        setGroups(realGroups);
+      }
+
       // Fetch all messages visible to me to aggregate conversations correctly
       const { data: messagesData } = await supabase
         .from('messages')
@@ -261,7 +279,13 @@ export const ChatListPage: React.FC = () => {
             return timeB - timeA;
           });
 
-          setConversations(conversationList);
+          let secretContactIds: string[] = [];
+          try {
+            secretContactIds = JSON.parse(localStorage.getItem('inspire_vault_secret_contacts_v1') || '[]');
+          } catch {
+            secretContactIds = [];
+          }
+          setConversations(conversationList.filter((conversation) => !secretContactIds.includes(conversation.id)));
         } else {
           setConversations([]);
         }
