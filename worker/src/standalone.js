@@ -136,15 +136,15 @@ export default {
             sampleDialogue ? `Style examples (imitate the tone, not the exact wording): ${sampleDialogue}` : '',
             'Output only the character’s next message. Do not add a speaker label.',
           ].filter(Boolean).join('\n');
-          const result = await env.AI.run('@cf/meta/llama-3.3-70b-instruct-fp8-fast', {
+          const result = await env.AI.run('@cf/google/gemma-4-26b-a4b-it', {
             messages: [{ role: 'system', content: system }, ...history, { role: 'user', content: currentMessage }],
             max_tokens: responseLength === 'short' ? 120 : responseLength === 'detailed' ? 420 : 240,
             temperature,
           });
           const reply = String(result?.response || '').trim();
           if (!reply) throw new Error('Character model returned an empty response.');
-          if (groupMode && /^\\[NO_REPLY\\]$/i.test(reply.trim())) return json({ reply: '', should_reply: false, model: '@cf/meta/llama-3.3-70b-instruct-fp8-fast' }, 200, headers);
-          return json({ reply: reply.slice(0, 5000), should_reply: true, model: '@cf/meta/llama-3.3-70b-instruct-fp8-fast' }, 200, headers);
+          if (groupMode && /^\\[NO_REPLY\\]$/i.test(reply.trim())) return json({ reply: '', should_reply: false, model: '@cf/google/gemma-4-26b-a4b-it' }, 200, headers);
+          return json({ reply: reply.slice(0, 5000), should_reply: true, model: '@cf/google/gemma-4-26b-a4b-it' }, 200, headers);
         }
         case '/api/ai/smart-reply': {
           const text = String(body.message_text || '').trim();
