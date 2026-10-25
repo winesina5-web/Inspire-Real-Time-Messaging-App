@@ -1532,17 +1532,20 @@ export const ChatPage: React.FC = () => {
 
             {/* Soft-filled text input with Feature 98 Ghost Text Autocomplete */}
             <div className="relative flex-1">
-              <input
-                type="text"
+              <textarea
+                rows={1}
                 spellCheck="true"
                 value={inputText}
                 onChange={(event) => {
                   handleInputChange(event);
+                  event.currentTarget.style.height = 'auto';
+                  event.currentTarget.style.height = `${Math.min(event.currentTarget.scrollHeight, 144)}px`;
+                  event.currentTarget.style.overflowY = event.currentTarget.scrollHeight > 144 ? 'auto' : 'hidden';
                   if (event.target.value.trim()) notifyTyping();
                 }}
                 onKeyDown={handleKeyDown}
-                placeholder={isAnonymousSend ? 'Type anonymous message…' : 'Type a message… (Enter to send, Tab to complete)'}
-                className={`w-full px-4 py-2.5 rounded-2xl bg-[#F5F7FA] dark:bg-[#1A2234] border ${
+                placeholder={isAnonymousSend ? 'Type anonymous message…' : 'Type a message…'}
+                className={`w-full min-h-[42px] max-h-36 resize-none px-3.5 py-2.5 rounded-2xl bg-white/10 border ${
                   isAnonymousSend ? 'border-amber-500/60' : 'border-[#E5E7EB] dark:border-[#2A3348]'
                 } text-black dark:text-white font-medium text-sm focus:outline-none focus:border-[#0E2A6E] dark:focus:border-[#3D6FE0]`}
               />
