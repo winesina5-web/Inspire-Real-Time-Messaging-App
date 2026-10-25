@@ -7,11 +7,15 @@ import {
   AICharacter, createCharacter, loadCharacters, saveCharacters,
 } from '../lib/aiCharacters';
 
-const emptyForm = {
+const emptyForm: {
+  name: string; role: string; behavior: string; scenario: string; speakingStyle: string;
+  language: string; temperature: number; responseLength: 'short' | 'balanced' | 'detailed';
+  memoryEnabled: boolean; groupParticipation: 'mentioned_or_relevant' | 'mentioned_only' | 'every_message'; sampleDialogue: string;
+} = {
   name: '', role: '', behavior: '', scenario: '', speakingStyle: 'Natural, expressive, emotionally aware',
   language: 'Match my language (Urdu, Roman Urdu, English, etc.)', temperature: 0.85,
-  responseLength: 'balanced' as const, memoryEnabled: true,
-  groupParticipation: 'mentioned_or_relevant' as const, sampleDialogue: '',
+  responseLength: 'balanced', memoryEnabled: true,
+  groupParticipation: 'mentioned_or_relevant', sampleDialogue: '',
 };
 
 async function compressAvatar(file: File): Promise<string> {
