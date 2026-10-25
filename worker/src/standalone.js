@@ -140,6 +140,7 @@ export default {
             messages: [{ role: 'system', content: system }, ...history, { role: 'user', content: currentMessage }],
             max_tokens: responseLength === 'short' ? 120 : responseLength === 'detailed' ? 420 : 240,
             temperature,
+            chat_template_kwargs: { enable_thinking: false },
           });
           const reply = String(result?.response || '').trim();
           if (!reply) throw new Error('Character model returned an empty response.');
