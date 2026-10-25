@@ -422,29 +422,10 @@ export const ChatPage: React.FC = () => {
     setDisappearSeconds(null);
 
     if (isAnonymousSend) {
-      // Feature 125 Anonymous Send local message
-      const anonMsg: Message = {
-        id: `anon_${Date.now()}`,
-        sender_id: user?.id || 'anon',
-        receiver_id: partnerId,
-        content: text,
-        message_type: 'text',
-        media_url: null,
-        media_size: null,
-        media_name: null,
-        reply_to_id: replyId || null,
-        is_deleted_sender: false,
-        is_deleted_receiver: false,
-        is_read: false,
-        read_at: null,
-        created_at: new Date().toISOString(),
-        is_anonymous: true,
-        expires_at: new Date(Date.now() + 60000).toISOString(), // auto disappear
-        reactions: [],
-      };
-      addLocalMessage(anonMsg);
+      // Do not claim anonymity while the database still records the authenticated sender.
+      setInputText(text);
       setIsAnonymousSend(false);
-      toast('🕵️ Sent anonymously — self-destruct active', 'success');
+      toast('Anonymous sending is temporarily disabled until sender identity can be protected server-side.', 'error');
       return;
     }
 
@@ -1490,18 +1471,13 @@ export const ChatPage: React.FC = () => {
                 {/* Feature 125 Anonymous Toggle */}
                 <button
                   type="button"
-                  onClick={() => {
-                    setIsAnonymousSend((prev) => !prev);
-                    setShowAttachMenu(false);
-                    toast(
-                      !isAnonymousSend ? '🕵️ Anonymous send activated' : 'Anonymous send deactivated',
-                      'info'
-                    );
-                  }}
-                  className="flex items-center space-x-2.5 p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-gray-800 text-xs font-bold text-amber-500"
+                  disabled
+                  title="Anonymous sending is unavailable until sender identity is protected server-side."
+                  onClick={() => setShowAttachMenu(false)}
+                  className="flex items-center space-x-2.5 p-2 rounded-xl text-xs font-bold text-gray-400 cursor-not-allowed opacity-70"
                 >
                   <span className="text-lg">🕵️</span>
-                  <span>{isAnonymousSend ? 'Disable Anonymous' : 'Send Anonymously'}</span>
+                  <span>Anonymous Send (unavailable)</span>
                 </button>
               </div>
             </>
