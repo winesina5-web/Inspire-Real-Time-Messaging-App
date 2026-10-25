@@ -1607,6 +1607,44 @@ export const ChatPage: React.FC = () => {
         </footer>
       )}
 
+      {showContactProfile && partnerProfile && (
+        <div className="fixed inset-0 z-[70] bg-black/55 flex items-center justify-center p-4" onClick={() => setShowContactProfile(false)}>
+          <section role="dialog" aria-modal="true" aria-label="Contact profile" className="w-full max-w-sm max-h-[85dvh] overflow-y-auto rounded-2xl bg-white dark:bg-[#161B2B] text-gray-900 dark:text-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+            <div className="chat-app-header flex items-center justify-between px-4 py-3">
+              <h3 className="text-sm font-bold">Contact info</h3>
+              <button type="button" onClick={() => setShowContactProfile(false)} aria-label="Close profile" className="p-1 rounded-full hover:bg-white/10"><X size={18} /></button>
+            </div>
+            <div className="p-5 text-center">
+              <Avatar name={partnerProfile.display_name || partnerProfile.username} avatarUrl={partnerProfile.avatar_url} size="lg" />
+              <h4 className="mt-3 text-lg font-bold">{partnerProfile.display_name}</h4>
+              <p className="text-sm text-gray-500 dark:text-gray-400">@{partnerProfile.username}</p>
+              {partnerProfile.bio && <p className="mt-2 text-sm">{partnerProfile.bio}</p>}
+            </div>
+            <div className="px-4 pb-4 space-y-2">
+              <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400">Name you see (only you)</label>
+              <div className="flex gap-2">
+                <input value={contactAliasDraft} onChange={(event) => setContactAliasDraft(event.target.value)} maxLength={60} className="min-w-0 flex-1 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 px-3 py-2 text-sm" placeholder="Contact name" />
+                <button type="button" disabled={isSavingAlias} onClick={handleSaveContactAlias} className="rounded-lg bg-[#0E2A6E] px-3 py-2 text-xs font-bold text-white disabled:opacity-50">{isSavingAlias ? 'Saving…' : 'Save'}</button>
+              </div>
+              <div className="pt-3 border-t border-gray-200 dark:border-gray-700">
+                <h5 className="text-sm font-bold">Shared media, links and files</h5>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{sharedMedia.length} items in this conversation</p>
+                {sharedMedia.length === 0 ? <p className="py-4 text-xs text-gray-500">No shared media yet.</p> : (
+                  <div className="mt-2 space-y-1">
+                    {sharedMedia.slice(-30).reverse().map((item) => (
+                      <button key={item.id} type="button" onClick={async () => { const url = item.media_url?.startsWith('http') ? item.media_url : await workerApi.getDownloadUrl(item.media_url || ''); if (url) window.open(url, '_blank', 'noopener,noreferrer'); else toast('This media could not be opened.', 'error'); }} className="w-full flex items-center gap-2 rounded-lg px-2 py-2 text-left hover:bg-gray-100 dark:hover:bg-gray-800">
+                        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#FFD700] text-[#1A1A2E]">{item.message_type === 'image' ? <ImageIcon size={16} /> : <FileAudio size={16} />}</span>
+                        <span className="min-w-0 flex-1"><span className="block truncate text-xs font-semibold">{item.media_name || item.message_type.replace('_', ' ')}</span><span className="block text-[10px] text-gray-500">{new Date(item.created_at).toLocaleDateString()}</span></span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
+        </div>
+      )}
+
       {/* Feature 107: Thread Replies Drawer */}
       {activeThreadMessage && (
         <ThreadDrawer
