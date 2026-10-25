@@ -189,10 +189,12 @@ export const ChatPage: React.FC = () => {
   useEffect(() => {
     if (!partnerId) return;
 
+    setIsBlocked(false);
     const fetchPartner = async () => {
       setPartnerLoading(true);
 
       if (!isConfigured) {
+        setIsBlocked(false);
         // Mock partner profile
         setPartnerProfile({
           id: partnerId,
@@ -667,6 +669,7 @@ export const ChatPage: React.FC = () => {
   const handleBlockUser = async () => {
     if (!user || !partnerId) return;
     if (!isConfigured) {
+      setShowBlockConfirm(false);
       toast('Connect to the server before blocking contacts.', 'error');
       return;
     }
@@ -692,6 +695,7 @@ export const ChatPage: React.FC = () => {
   const handleUnblockUser = async () => {
     if (!user || !partnerId) return;
     if (!isConfigured) {
+      setShowBlockConfirm(false);
       toast('Connect to the server before unblocking contacts.', 'error');
       return;
     }
