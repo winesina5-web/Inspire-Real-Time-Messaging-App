@@ -10,6 +10,9 @@ import { GroupEventModal } from '../components/GroupEventModal';
 import { PaymentSplitModal } from '../components/PaymentSplitModal';
 import { Group, Message, Profile, PollData, GroupEvent, PaymentSplit } from '../types';
 import { supabase, isConfigured } from '../lib/supabaseClient';
+import { GroupAICharactersPanel } from '../components/GroupAICharactersPanel';
+import { GroupAICharacter, loadCharacters } from '../lib/aiCharacters';
+import { workerApi } from '../lib/workerApi';
 
 export const GroupChatPage: React.FC = () => {
   const { groupId } = useParams<{ groupId: string }>();
@@ -28,6 +31,11 @@ export const GroupChatPage: React.FC = () => {
   const [showEventModal, setShowGroupEventModal] = useState(false);
   const [showSplitModal, setShowPaymentSplitModal] = useState(false);
   const [activeThreadMessage, setActiveThreadMessage] = useState<Message | null>(null);
+  const [showAICharactersPanel, setShowAICharactersPanel] = useState(false);
+  const [groupAICharacters, setGroupAICharacters] = useState<GroupAICharacter[]>([]);
+  const groupAICharactersRef = useRef<GroupAICharacter[]>([]);
+  const messagesRef = useRef<Message[]>([]);
+  const processingGroupMessageIdsRef = useRef<Set<string>>(new Set());
 
   // Group Slow Mode (Feature 113)
   const [slowModeSeconds, setSlowModeSeconds] = useState(0);
@@ -35,6 +43,9 @@ export const GroupChatPage: React.FC = () => {
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
   const lastMessageIdRef = useRef<string | null>(null);
+
+  messagesRef.current = messages;
+  groupAICharactersRef.current = groupAICharacters;
 
   // Only auto-scroll when the newest message changes. Prepending older history
   // must not yank the reader back to the bottom.
@@ -53,6 +64,74 @@ export const GroupChatPage: React.FC = () => {
     }, 1000);
     return () => clearInterval(timer);
   }, [cooldownRemaining]);
+
+  const maybeReplyAsGroupAI = async (newMessage: any) => {
+    if (!user || !groupId || !newMessage?.id || !newMessage.content || newMessage.ai_character_id) return;
+    if (processingGroupMessageIdsRef.current.has(newMessage.id)) return;
+    processingGroupMessageIdsRef.current.add(newMessage.id);
+    try {
+      const active = groupAICharactersRef.current.filter((character) => character.is_active && character.added_by === user.id);
+      if (!active.length) return;
+      const text = String(newMessage.content).slice(0, 2000);
+      const mentions = (character: GroupAICharacter) => text.toLocaleLowerCase().includes(character.name.toLocaleLowerCase());
+      const mentioned = active.filter(mentions);
+      const eligible = active.filter((character) => character.trigger_mode !== 'mentioned_only' || mentions(character))
+        .sort((a, b) => Number(mentions(b)) - Number(mentions(a)));
+      const chosen = [...mentioned, ...eligible.filter((item) => !mentioned.some((m) => m.id === item.id))].slice(0, 2);
+      for (const character of chosen) {
+        const lockKey = `inspire_group_ai_lock:${groupId}:${newMessage.id}:${character.character_id}`;
+        try {
+          const existing = localStorage.getItem(lockKey);
+          if (existing && Date.now() - Number(existing) < 10 * 60 * 1000) continue;
+          localStorage.setItem(lockKey, String(Date.now()));
+        } catch { /* continue in-memory if storage is unavailable */ }
+        const context = [...messagesRef.current].filter((message) => message.id !== newMessage.id && message.content).slice(-10).map((message) => ({
+          role: message.ai_character_id === character.character_id ? 'assistant' as const : 'user' as const,
+          content: `${message.ai_character_name || (message.sender_id === user.id ? 'You' : 'Group member')}: ${String(message.content).slice(0, 700)}`,
+        }));
+        const localCharacter = loadCharacters(user.id).find((item) => item.id === character.character_id);
+        try {
+          const result = await workerApi.chatWithCharacter({
+            name: character.name, role: character.role, behavior: character.behavior,
+            scenario: character.scenario, speakingStyle: character.speaking_style,
+            language: character.language, sampleDialogue: character.sample_dialogue,
+            temperature: Number(character.temperature) || 0.85, responseLength: character.response_length,
+            message: `${newMessage.sender_id === user.id ? 'You' : 'Group member'}: ${text}`,
+            history: context, groupMode: character.trigger_mode !== 'every_message',
+          });
+          if (!result.shouldReply || !result.reply.trim()) {
+            try { localStorage.removeItem(lockKey); } catch { /* ignore */ }
+            continue;
+          }
+          const { data, error } = await supabase.from('group_messages').insert({
+            group_id: groupId, sender_id: user.id, content: result.reply.slice(0, 5000),
+            message_type: 'text', ai_character_id: character.character_id,
+            ai_character_name: character.name,
+            ai_character_avatar_url: character.avatar_url?.startsWith('https://') ? character.avatar_url : null,
+          }).select('id, sender_id, group_id, content, message_type, media_url, media_size, media_name, reply_to_id, is_deleted, created_at, edited_at, thread_reply_count, ai_character_id, ai_character_name, ai_character_avatar_url').single();
+          if (error) throw error;
+          if (data) {
+            const mapped: Message = {
+              id: data.id, sender_id: data.sender_id, group_id: data.group_id, content: data.content,
+              message_type: data.message_type, media_url: data.media_url, media_size: data.media_size,
+              media_name: data.media_name, reply_to_id: data.reply_to_id, is_deleted_sender: false,
+              is_deleted_receiver: false, is_read: true, read_at: null, created_at: data.created_at,
+              edited_at: data.edited_at, thread_reply_count: data.thread_reply_count || 0, reactions: [],
+              ai_character_id: data.ai_character_id, ai_character_name: data.ai_character_name,
+              ai_character_avatar_url: localCharacter?.avatarUrl || data.ai_character_avatar_url || null,
+            };
+            setMessages((current) => current.some((item) => item.id === mapped.id) ? current : [...current, mapped]);
+          }
+          await supabase.from('group_ai_characters').update({ last_spoke_at: new Date().toISOString() }).eq('id', character.id).eq('added_by', user.id);
+        } catch (error) {
+          console.warn('Group AI reply failed:', error);
+          try { localStorage.removeItem(lockKey); } catch { /* ignore */ }
+        }
+      }
+    } finally {
+      processingGroupMessageIdsRef.current.delete(newMessage.id);
+    }
+  };
 
   // Load group info, membership role, and messages
   useEffect(() => {
@@ -105,6 +184,10 @@ export const GroupChatPage: React.FC = () => {
             slow_mode_interval: interval,
           });
 
+          const { data: aiRows, error: aiRowsError } = await supabase.from('group_ai_characters').select('id, group_id, character_id, added_by, name, role, behavior, scenario, speaking_style, avatar_url, trigger_mode, is_active, language, temperature, response_length, sample_dialogue, last_spoke_at').eq('group_id', groupId).order('created_at', { ascending: true });
+          if (aiRowsError) console.warn('Group AI members could not be loaded:', aiRowsError.message);
+          setGroupAICharacters((aiRows || []) as GroupAICharacter[]);
+
           // Fetch the newest page first so large groups don't download their full history.
           const { data: msgRows, error: msgErr } = await supabase
             .from('group_messages')
@@ -121,7 +204,10 @@ export const GroupChatPage: React.FC = () => {
               is_deleted,
               created_at,
               edited_at,
-              thread_reply_count
+              thread_reply_count,
+              ai_character_id,
+              ai_character_name,
+              ai_character_avatar_url
             `)
             .eq('group_id', groupId)
             .order('created_at', { ascending: false })
@@ -147,6 +233,9 @@ export const GroupChatPage: React.FC = () => {
                 edited_at: m.edited_at,
                 thread_reply_count: m.thread_reply_count || 0,
                 reactions: [],
+                ai_character_id: m.ai_character_id || null,
+                ai_character_name: m.ai_character_name || null,
+                ai_character_avatar_url: m.ai_character_avatar_url || loadCharacters(user.id).find((character) => character.id === m.ai_character_id)?.avatarUrl || null,
               }));
             // Preserve realtime messages that may arrive while the initial query is in flight.
             setMessages((current) => {
@@ -211,9 +300,13 @@ export const GroupChatPage: React.FC = () => {
                   edited_at: newM.edited_at,
                   thread_reply_count: newM.thread_reply_count || 0,
                   reactions: [],
+                  ai_character_id: newM.ai_character_id || null,
+                  ai_character_name: newM.ai_character_name || null,
+                  ai_character_avatar_url: newM.ai_character_avatar_url || loadCharacters(user.id).find((character) => character.id === newM.ai_character_id)?.avatarUrl || null,
                 },
               ];
             });
+            void maybeReplyAsGroupAI(newM);
           }
         )
         .subscribe();
@@ -321,6 +414,9 @@ export const GroupChatPage: React.FC = () => {
             sender_id: user.id,
             content,
             message_type: 'text',
+            ai_character_id: null,
+            ai_character_name: null,
+            ai_character_avatar_url: null,
           })
           .select()
           .single();
@@ -330,9 +426,8 @@ export const GroupChatPage: React.FC = () => {
           // Revert optimistic message
           setMessages((prev) => prev.filter((m) => m.id !== tempId));
         } else if (data) {
-          setMessages((prev) =>
-            prev.map((m) => (m.id === tempId ? { ...m, id: data.id } : m))
-          );
+          setMessages((prev) => prev.map((m) => (m.id === tempId ? { ...m, id: data.id } : m)));
+          void maybeReplyAsGroupAI({ ...data, sender_id: user.id, content });
         }
       } catch (err) {
         console.warn('Group send error:', err);
@@ -406,13 +501,14 @@ export const GroupChatPage: React.FC = () => {
                   </span>
                 )}
               </div>
-              <p className="text-[10px] text-gray-500 font-semibold">{group.members_count} members • Group Chat</p>
+              <p className="text-[10px] text-gray-500 font-semibold">{group.members_count} members • Group Chat{groupAICharacters.length ? ` • ${groupAICharacters.length} AI` : ''}</p>
             </div>
           </div>
         </div>
 
         {/* Action icons */}
         <div className="flex items-center space-x-1">
+          <button onClick={() => setShowAICharactersPanel(true)} className="p-2 rounded-full hover:bg-violet-50 dark:hover:bg-violet-950/40 text-sm" title="Manage AI group members">🎭</button>
           <button
             onClick={() => setShowGroupEventModal(true)}
             className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 text-sm"
@@ -459,6 +555,8 @@ export const GroupChatPage: React.FC = () => {
           </div>
         ) : (
           messages.map((m) => (
+            <div key={m.id} className="space-y-1">
+            {m.ai_character_id && <div className="flex items-center gap-2 pl-1 text-[10px] font-bold text-violet-700 dark:text-violet-300"><Avatar name={m.ai_character_name || 'AI Character'} avatarUrl={m.ai_character_avatar_url} size="xs" /><span>{m.ai_character_name || 'AI Character'}</span><span className="rounded-full bg-violet-100 dark:bg-violet-950/50 px-1.5 py-0.5">AI</span></div>}
             <MessageBubble
               key={m.id}
               message={m}
@@ -474,6 +572,7 @@ export const GroupChatPage: React.FC = () => {
               }}
               onOpenThread={(msg) => setActiveThreadMessage(msg)}
             />
+            </div>
           ))
         )}
         <div ref={messagesEndRef} />
@@ -507,6 +606,8 @@ export const GroupChatPage: React.FC = () => {
           </button>
         </form>
       </footer>
+
+      {showAICharactersPanel && groupId && user && <GroupAICharactersPanel groupId={groupId} userId={user.id} onClose={() => setShowAICharactersPanel(false)} onChanged={(next) => { setGroupAICharacters(next); groupAICharactersRef.current = next; }} />}
 
       {/* Sub-thread Drawer */}
       {activeThreadMessage && (
