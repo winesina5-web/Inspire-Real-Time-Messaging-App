@@ -140,10 +140,10 @@ export const VoiceNotePlayer: React.FC<VoiceNotePlayerProps> = ({ audioUrl, isSe
         {!loadError && isLoading && <span className="text-[10px] opacity-70">Loading audio…</span>}
         <div className="flex justify-between text-[11px] font-bold">
           <span className={isSentByMe ? 'text-white/90' : 'text-gray-700 dark:text-gray-300'}>
-            {formatDuration(isPlaying ? currentTime : (duration || 0))}
+            {formatDuration(currentTime)} / {formatDuration(duration)}
           </span>
           <span className={`text-[10px] ${isSentByMe ? 'text-white/70' : 'text-gray-400'}`}>
-            🎤 Voice Note
+            Voice message
           </span>
         </div>
       </div>
