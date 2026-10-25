@@ -71,7 +71,19 @@ export const GroupMembersPanel: React.FC<Props> = ({ groupId, currentUserId, cur
     }
   }, [groupId, onMembershipChanged, toast]);
 
-  useEffect(() => { void loadMembers(); }, [loadMembers]);
+  useEffect(() => {
+    void loadMembers();
+    const channel = supabase
+      .channel(`group-members:${groupId}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'group_members',
+        filter: `group_id=eq.${groupId}`,
+      }, () => { void loadMembers(); })
+      .subscribe();
+    return () => { void supabase.removeChannel(channel); };
+  }, [groupId, loadMembers]);
 
   const searchPeople = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -104,13 +116,14 @@ export const GroupMembersPanel: React.FC<Props> = ({ groupId, currentUserId, cur
     if (!isAdmin) return;
     setBusyId(profile.id);
     try {
-      const { error } = await supabase.from('group_members').insert({
-        group_id: groupId,
-        user_id: profile.id,
-        role: 'member',
+      const { error } = await supabase.rpc('add_group_member', {
+        target_group_id: groupId,
+        target_user_id: profile.id,
       });
       if (error) {
         if (error.code === '23505') throw new Error('This person is already a group member.');
+        if (error.code === '42501') throw new Error('Only a group admin can add members.');
+        if (error.code === '23514') throw new Error('This group has reached its member limit.');
         throw error;
       }
       toast(`@${profile.username || profile.display_name} added to the group.`, 'success');
