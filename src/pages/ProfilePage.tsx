@@ -591,15 +591,6 @@ export const ProfilePage: React.FC = () => {
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={() => navigate('/blocked-users')}
-          className="w-full p-4 rounded-2xl bg-white dark:bg-[#161B2B] border border-[#E5E7EB] dark:border-[#2A3348] flex items-center justify-between text-xs font-bold hover:bg-gray-50 dark:hover:bg-gray-800/40 text-left"
-        >
-          <div className="flex items-center space-x-2.5"><span>🚫</span><span>Blocked Users</span></div>
-          <span className="text-gray-400">Manage →</span>
-        </button>
-
         {/* Profile Edit Form */}
         <form onSubmit={handleSaveProfile} className="space-y-4 bg-white dark:bg-[#161B2B] p-5 rounded-3xl border border-[#E5E7EB] dark:border-[#2A3348] shadow-sm">
           <h3 className="font-extrabold text-sm text-black dark:text-white">
