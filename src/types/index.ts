@@ -139,6 +139,9 @@ export interface Message {
   is_starred?: boolean;
   is_pinned?: boolean;
   ai_alt_text?: string | null;
+  ai_character_id?: string | null;
+  ai_character_name?: string | null;
+  ai_character_avatar_url?: string | null;
   delivery_status?: 'sending' | 'sent' | 'delivered' | 'read' | 'failed';
   // Document 09 Wave 2 extensions
   thread_id?: string | null;
