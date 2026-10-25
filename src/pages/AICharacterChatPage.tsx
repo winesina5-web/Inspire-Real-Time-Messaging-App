@@ -132,7 +132,7 @@ export const AICharacterChatPage: React.FC = () => {
             <div className="py-12 text-center max-w-md mx-auto">
               <Avatar name={character.name} avatarUrl={character.avatarUrl} size="xl" />
               <h2 className="font-black text-2xl mt-4">Say hello to {character.name}</h2>
-              <p className="text-sm text-gray-500 mt-2">{character.scenario || character.behavior || 'Start a conversation and let the character's personality come through.'}</p>
+              <p className="text-sm text-gray-500 mt-2">{character.scenario || character.behavior || "Start a conversation and let the character's personality come through."}</p>
               <div className="flex flex-wrap justify-center gap-2 mt-5">{['Tell me about yourself', 'Let’s roleplay a scene 🎭', 'I need some advice 💭'].map((suggestion) => <button key={suggestion} onClick={() => { setInput(suggestion); inputRef.current?.focus(); }} className="rounded-full border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 px-3 py-2 text-xs font-semibold">{suggestion}</button>)}</div>
             </div>
           )}
