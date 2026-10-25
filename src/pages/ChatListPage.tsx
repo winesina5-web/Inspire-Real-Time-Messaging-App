@@ -955,7 +955,7 @@ export const ChatListPage: React.FC = () => {
                                 type="button"
                                 aria-label={`View ${partner.display_name || 'contact'} status`}
                                 title="View status"
-                                onClick={(e) => { e.stopPropagation(); navigate('/status'); }}
+                                onClick={(e) => { e.stopPropagation(); navigate(`/status?userId=${partner.id}`); }}
                                 className="absolute -inset-[3px] z-10 rounded-full border-[2.5px] border-emerald-500 p-[2px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-400"
                               />
                             )}
