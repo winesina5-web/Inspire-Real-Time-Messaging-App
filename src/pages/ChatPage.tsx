@@ -840,6 +840,25 @@ export const ChatPage: React.FC = () => {
     setReminderTargetMessage(null);
   };
 
+  const handleSaveContactAlias = async () => {
+    if (!user?.id || !partnerId) return;
+    setIsSavingAlias(true);
+    try {
+      const alias = contactAliasDraft.trim();
+      const { error } = await supabase.from('contacts').upsert({ user_id: user.id, contact_id: partnerId, custom_name: alias || null }, { onConflict: 'user_id,contact_id' });
+      if (error) throw error;
+      setPartnerProfile((current) => current ? { ...current, display_name: alias || current.username || current.display_name } : current);
+      toast('Contact name updated for you only.', 'success');
+    } catch (error) {
+      console.warn('Save contact alias failed:', error);
+      toast('Could not save this contact name. Please try again.', 'error');
+    } finally {
+      setIsSavingAlias(false);
+    }
+  };
+
+  const sharedMedia = messages.filter((message) => ['image', 'video', 'audio', 'voice_note', 'file'].includes(message.message_type) && Boolean(message.media_url));
+
   const partnerIsOnline = partnerId ? isOnline(partnerId) : false;
   const wordCount = inputText.trim().split(/\s+/).filter(Boolean).length;
 
