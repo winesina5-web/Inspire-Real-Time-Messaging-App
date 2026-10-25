@@ -75,12 +75,25 @@ export default {
     if (!user?.id) return json({ error: 'Unauthorized: valid Supabase session required' }, 401, headers);
 
     const contentType = request.headers.get('Content-Type') || '';
+    const contentLength = Number(request.headers.get('Content-Length') || 0);
+    const isMultipart = contentType.toLowerCase().includes('multipart/form-data');
+    const maxBodyBytes = isMultipart ? 22 * 1024 * 1024 : 1024 * 1024;
+    if (contentLength > maxBodyBytes) {
+      return json({ error: 'Request body exceeds the allowed size limit.' }, 413, headers);
+    }
     let formData = null;
     let body = {};
-    if (contentType.toLowerCase().includes('multipart/form-data')) {
+    if (isMultipart) {
       formData = await request.formData().catch(() => null);
+      if (!formData) return json({ error: 'Invalid multipart form data.' }, 400, headers);
     } else {
-      body = await request.json().catch(() => ({}));
+      if (contentType && !contentType.toLowerCase().includes('application/json')) {
+        return json({ error: 'Unsupported content type.' }, 415, headers);
+      }
+      body = await request.json().catch(() => null);
+      if (!body || typeof body !== 'object' || Array.isArray(body)) {
+        return json({ error: 'A valid JSON object is required.' }, 400, headers);
+      }
     }
     try {
       switch (url.pathname) {
@@ -107,9 +120,14 @@ export default {
           return json({ translated_text }, 200, headers);
         }
         case '/api/ai/smart-search': {
-          const query = String(body.query || '').toLowerCase();
+          const query = String(body.query || '').trim().toLowerCase().slice(0, 200);
+          if (!query) return json({ matching_ids: [] }, 200, headers);
           const messages = Array.isArray(body.messages) ? body.messages.slice(0, 100) : [];
-          const matching_ids = messages.filter((m) => String(m.content || '').toLowerCase().includes(query)).map((m) => m.id).filter(Boolean).slice(0, 20);
+          const matching_ids = messages
+            .filter((m) => String(m?.content || '').toLowerCase().includes(query))
+            .map((m) => m?.id)
+            .filter((id) => typeof id === 'string' && id.length <= 128)
+            .slice(0, 20);
           return json({ matching_ids }, 200, headers);
         }
         case '/api/ai/moderate': {
@@ -208,13 +226,28 @@ export default {
           return json({ iceServers: [{ urls: 'stun:stun.cloudflare.com:3478' }, { urls: 'stun:stun.l.google.com:19302' }] }, 200, headers);
         case '/api/link-preview':
           return json({ error: 'Link preview endpoint is not included in this first deployment.' }, 501, headers);
-        case '/api/gif-search':
-          return json({ gifs: [] }, 200, headers);
+        case '/api/gif-search': {
+          const query = String(body.query || '').trim().slice(0, 200);
+          if (!query) return json({ gifs: [] }, 200, headers);
+          if (!env.TENOR_API_KEY) {
+            return json({ error: 'GIF search is not configured. Add a Tenor API key to enable this feature.' }, 503, headers);
+          }
+          const params = new URLSearchParams({ q: query, key: env.TENOR_API_KEY, limit: '20', media_filter: 'tinygif,gif', contentfilter: 'medium' });
+          const response = await fetch(`https://tenor.googleapis.com/v2/search?${params.toString()}`, { headers: { Accept: 'application/json' } });
+          if (!response.ok) return json({ error: 'GIF provider is temporarily unavailable.' }, 502, headers);
+          const data = await response.json();
+          const gifs = (Array.isArray(data.results) ? data.results : [])
+            .map((item) => item?.media_formats?.tinygif?.url || item?.media_formats?.gif?.url)
+            .filter((value) => typeof value === 'string' && /^https:\/\//i.test(value))
+            .slice(0, 20);
+          return json({ gifs }, 200, headers);
+        }
         default:
           return json({ error: 'Endpoint not found', path: url.pathname }, 404, headers);
       }
     } catch (error) {
-      return json({ error: 'AI request failed', details: error instanceof Error ? error.message : String(error) }, 502, headers);
+      console.error('Inspire Worker request failed:', error instanceof Error ? error.message : String(error));
+      return json({ error: 'Request could not be completed. Please try again shortly.' }, 502, headers);
     }
   },
 };
