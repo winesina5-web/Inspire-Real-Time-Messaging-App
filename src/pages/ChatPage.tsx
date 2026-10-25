@@ -518,8 +518,8 @@ export const ChatPage: React.FC = () => {
       } else {
         toast('Media uploaded, but message delivery failed. Please retry.', 'error');
       }
-    } else if (uploadError) {
-      toast(uploadError, 'error');
+    } else {
+      toast(uploadError || 'Media upload failed. Please check the file size, connection and Storage permissions.', 'error');
     }
 
     if (fileInputRef.current) fileInputRef.current.value = '';
