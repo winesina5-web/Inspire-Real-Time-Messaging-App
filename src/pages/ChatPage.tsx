@@ -507,8 +507,9 @@ export const ChatPage: React.FC = () => {
         return;
       }
 
+      const caption = inputText.trim();
       const sent = await sendMessage(
-        '',
+        caption,
         type,
         {
           url: result.object_key,
@@ -519,6 +520,7 @@ export const ChatPage: React.FC = () => {
       );
       if (sent) {
         setReplyingTo(null);
+        setInputText('');
         toast('Media sent!', 'success');
       } else {
         toast('Media uploaded, but message delivery failed. Please retry.', 'error');
