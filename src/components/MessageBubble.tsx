@@ -282,7 +282,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           className={`relative px-3.5 py-2 rounded-2xl shadow-sm text-sm transition-shadow select-text ${
             isMe
               ? 'bg-[#0E2A6E] dark:bg-[#254BA8] text-white rounded-br-sm'
-              : 'bg-white dark:bg-[#161B2B] text-black dark:text-[#F5F7FA] border border-[#E5E7EB] dark:border-[#2A3348] rounded-bl-sm'
+              : 'bg-[#FFD700] text-black border border-[#F0CB00] rounded-bl-sm'
           }`}
         >
           {/* Pinned Marker (Feature 4) */}
