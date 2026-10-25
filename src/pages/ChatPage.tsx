@@ -350,7 +350,7 @@ export const ChatPage: React.FC = () => {
   }, [inputText, suggestEmojis]);
 
   // Handle typing notification
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     setInputText(e.target.value);
     setSmartComposeGhost('');
     notifyTyping();
@@ -438,7 +438,7 @@ export const ChatPage: React.FC = () => {
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     // Feature 98: Tab or ArrowRight accepts smart-compose ghost text
     if ((e.key === 'Tab' || e.key === 'ArrowRight') && smartComposeGhost) {
       e.preventDefault();
@@ -878,7 +878,7 @@ export const ChatPage: React.FC = () => {
       )}
 
       {/* Chat Top Header */}
-      <header className="flex-shrink-0 z-30 bg-white dark:bg-[#0B0F1A] border-b border-[#E5E7EB] dark:border-[#2A3348] px-3 py-2.5 flex items-center justify-between shadow-xs">
+      <header className="chat-app-header sticky top-0 flex-shrink-0 z-30 px-3 py-2 flex items-center justify-between shadow-sm">
         <div className="flex items-center space-x-2.5 min-w-0">
           <button
             onClick={() => navigate('/chats')}
@@ -1374,7 +1374,7 @@ export const ChatPage: React.FC = () => {
         </div>
       ) : isRecording ? (
         // Voice Note Live Recording Bar
-        <div className="p-3 bg-[#0E2A6E] text-white flex items-center justify-between animate-slide-up">
+        <div className="chat-app-footer p-3 text-white flex items-center justify-between animate-slide-up">
           <div className="flex items-center space-x-3">
             <span className="w-3.5 h-3.5 rounded-full bg-rose-500 animate-ping" />
             <span className="text-sm font-extrabold tracking-wider">
@@ -1400,7 +1400,7 @@ export const ChatPage: React.FC = () => {
           </div>
         </div>
       ) : (
-        <footer className="p-3 bg-white dark:bg-[#0B0F1A] border-t border-[#E5E7EB] dark:border-[#2A3348] relative">
+        <footer className="chat-app-footer p-2 border-t relative">
           {isPartnerTyping && (
             <div className="max-w-3xl mx-auto mb-2 px-3 py-1 text-xs font-semibold text-[#4B5563] dark:text-[#9CA3AF]" aria-live="polite">
               <TypingIndicator className="text-xs" />
@@ -1561,7 +1561,7 @@ export const ChatPage: React.FC = () => {
             {inputText.trim() ? (
               <button
                 type="submit"
-                className="w-10 h-10 rounded-full bg-[#0E2A6E] text-white flex items-center justify-center font-black hover:bg-[#081B47] active:scale-95 transition-transform shadow-md"
+                className="w-9 h-9 rounded-full bg-[#FFD700] text-[#1A1A2E] flex-shrink-0 flex items-center justify-center font-black hover:bg-yellow-300 active:scale-95 transition-transform shadow-md"
                 aria-label="Send message"
               >
                 ➤
@@ -1570,7 +1570,7 @@ export const ChatPage: React.FC = () => {
               <button
                 type="button"
                 onClick={startRecording}
-                className="w-10 h-10 rounded-full bg-[#0E2A6E] text-white flex items-center justify-center text-lg hover:bg-[#081B47] active:scale-95 transition-transform shadow-md"
+                className="w-9 h-9 rounded-full bg-[#FFD700] text-[#1A1A2E] flex-shrink-0 flex items-center justify-center hover:bg-yellow-300 active:scale-95 transition-transform shadow-md"
                 aria-label="Record voice note"
               >
                 🎤
