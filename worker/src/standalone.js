@@ -25,7 +25,7 @@ function json(data, status = 200, headers?) {
   return new Response(JSON.stringify(data), { status, headers: h });
 }
 
-async function requireUser(request, env): Promise<any | null> {
+async function requireUser(request, env) {
   const auth = request.headers.get('Authorization') || '';
   if (!auth.startsWith('Bearer ') || !env.SUPABASE_URL || !env.SUPABASE_ANON_KEY) return null;
   const response = await fetch(`${env.SUPABASE_URL}/auth/v1/user`, {
@@ -35,7 +35,7 @@ async function requireUser(request, env): Promise<any | null> {
   return await response.json();
 }
 
-async function ask(env, system, prompt, maxTokens = 180): Promise<string> {
+async function ask(env, system, prompt, maxTokens = 180) {
   if (!env.AI) throw new Error('Workers AI binding is missing on inspire-worker.');
   const result = await env.AI.run(MODEL, {
     messages: [{ role: 'system', content: system }, { role: 'user', content: prompt.slice(0, 12000) }],
@@ -46,7 +46,7 @@ async function ask(env, system, prompt, maxTokens = 180): Promise<string> {
   return text.trim();
 }
 
-function parseJson(text, fallback: T): T {
+function parseJson(text, fallback) {
   const cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
   try { return JSON.parse(cleaned); } catch {
     const start = cleaned.indexOf('[');
@@ -85,12 +85,12 @@ export default {
         }
         case '/api/ai/assistant': {
           const messages = Array.isArray(body.messages) ? body.messages.slice(-10) : [];
-          const reply = await ask(env, 'You are Inspire Assistant, a concise and helpful assistant inside a messaging app.', messages.map((m: any) => `${m.role || 'user'}: ${String(m.content || '')}`).join('\n'), 220);
+          const reply = await ask(env, 'You are Inspire Assistant, a concise and helpful assistant inside a messaging app.', messages.map((m) => `${m.role || 'user'}: ${String(m.content || '')}`).join('\n'), 220);
           return json({ reply }, 200, headers);
         }
         case '/api/ai/summarize': {
           const messages = Array.isArray(body.messages) ? body.messages.slice(-30) : [];
-          const summary = await ask(env, 'Summarize the conversation in concise bullet points. Do not invent details.', messages.map((m: any) => `${m.sender || 'User'}: ${m.content || ''}`).join('\n'), 180);
+          const summary = await ask(env, 'Summarize the conversation in concise bullet points. Do not invent details.', messages.map((m) => `${m.sender || 'User'}: ${m.content || ''}`).join('\n'), 180);
           return json({ summary }, 200, headers);
         }
         case '/api/ai/translate': {
@@ -102,7 +102,7 @@ export default {
         case '/api/ai/smart-search': {
           const query = String(body.query || '').toLowerCase();
           const messages = Array.isArray(body.messages) ? body.messages.slice(0, 100) : [];
-          const matching_ids = messages.filter((m: any) => String(m.content || '').toLowerCase().includes(query)).map((m: any) => m.id).filter(Boolean).slice(0, 20);
+          const matching_ids = messages.filter((m) => String(m.content || '').toLowerCase().includes(query)).map((m) => m.id).filter(Boolean).slice(0, 20);
           return json({ matching_ids }, 200, headers);
         }
         case '/api/ai/moderate': {
