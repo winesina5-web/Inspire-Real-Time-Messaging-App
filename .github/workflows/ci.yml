@@ -6,7 +6,6 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write
 
 jobs:
   verify:
@@ -22,25 +21,7 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Type-check frontend
-        id: typecheck
-        run: |
-          set +e
-          npm run lint 2>&1 | tee /tmp/lint.log
-          code=${PIPESTATUS[0]}
-          { echo 'lint_log<<EOF'; cat /tmp/lint.log; echo EOF; } >> "$GITHUB_OUTPUT"
-          exit "$code"
-      - name: Report type-check diagnostics on PR
-        if: failure() && steps.typecheck.outcome == 'failure'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const output = `TypeScript diagnostics from CI:\n\n${{ steps.typecheck.outputs.lint_log }}`.slice(0, 6000);
-            await github.rest.issues.createComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: context.issue.number,
-              body: output
-            })
+        run: npm run lint
       - name: Run unit and Worker security tests
         run: npm test
       - name: Build frontend
