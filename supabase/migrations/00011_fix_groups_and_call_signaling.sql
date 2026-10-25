@@ -91,7 +91,18 @@ create policy call_signals_select_participants on public.call_signals
 drop policy if exists call_signals_insert_sender on public.call_signals;
 create policy call_signals_insert_sender on public.call_signals
   for insert to authenticated
-  with check ((select auth.uid()) = sender_id and sender_id <> receiver_id);
+  with check (
+    (select auth.uid()) = sender_id
+    and sender_id <> receiver_id
+    and exists (
+      select 1 from public.calls c
+      where c.id = call_id
+        and (
+          (c.caller_id = (select auth.uid()) and c.callee_id = receiver_id)
+          or (c.callee_id = (select auth.uid()) and c.caller_id = receiver_id)
+        )
+    )
+  );
 
 drop policy if exists call_signals_delete_participants on public.call_signals;
 create policy call_signals_delete_participants on public.call_signals
