@@ -176,7 +176,8 @@ function AppRoutes() {
   }
 
   return (
-    <Routes>
+    <>
+      <Routes>
       {/* Guest Authentication Routes */}
       <Route
         path="/login"
