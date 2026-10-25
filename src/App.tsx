@@ -510,8 +510,7 @@ export default function App() {
   // Sync Dark/Light Mode on startup
   useEffect(() => {
     const savedTheme = localStorage.getItem('inspire_theme');
-    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-    if (savedTheme === 'dark' || (!savedTheme && prefersDark)) {
+    if (savedTheme === 'dark') {
       document.documentElement.classList.add('dark');
     } else {
       document.documentElement.classList.remove('dark');
