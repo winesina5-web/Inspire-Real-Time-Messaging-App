@@ -31,6 +31,7 @@ export function useMediaUpload() {
     } catch (err) {
       const msg = err instanceof Error ? err.message : 'Upload failed';
       setError(msg);
+      console.warn('Media upload failed:', msg);
       return null;
     } finally {
       setIsUploading(false);
