@@ -42,6 +42,19 @@ export const workerApi = {
     if (file.size > maxBytes) throw new Error(`File exceeds the ${Math.round(maxBytes / (1024 * 1024))} MB limit for ${messageType}.`);
 
     const originalName = filename || (file instanceof File ? file.name : 'attachment.bin');
+    const contentType = (file.type || 'application/octet-stream').toLowerCase().split(';')[0].trim();
+    const allowedByType: Record<string, string[]> = {
+      image: ['image/'], avatar: ['image/'], video: ['video/'],
+      audio: ['audio/'], voice_note: ['audio/'],
+    };
+    const prefixes = allowedByType[messageType];
+    if (prefixes && !prefixes.some((prefix) => contentType.startsWith(prefix))) {
+      throw new Error(`This file type is not valid for ${messageType} uploads.`);
+    }
+    // Block active web content even when it is disguised as a generic attachment.
+    if (['text/html', 'application/xhtml+xml', 'image/svg+xml', 'application/javascript', 'text/javascript'].includes(contentType)) {
+      throw new Error('This file type is blocked for safety. Upload a non-executable document instead.');
+    }
     const extension = originalName.includes('.')
       ? (originalName.split('.').pop() || 'bin').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 10) || 'bin'
       : 'bin';
@@ -51,7 +64,6 @@ export const workerApi = {
     const objectKey = messageType === 'avatar'
       ? `${user.id}/avatar.${extension}`
       : `${user.id}/${randomId}.${extension}`;
-    const contentType = file.type || 'application/octet-stream';
     const { data, error } = await supabase.storage.from('inspire-media').upload(objectKey, file, {
       contentType, cacheControl: '3600', upsert: messageType === 'avatar',
     });
