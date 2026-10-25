@@ -198,7 +198,7 @@ export default {
               body: JSON.stringify({ ttl: 3600 }),
             });
             if (!turnResponse.ok) throw new Error(`TURN credential request failed (${turnResponse.status})`);
-            const turnData = await turnResponse.json() as { iceServers?: RTCIceServer[] };
+            const turnData = await turnResponse.json() as { iceServers?: Array<{ urls: string | string[]; username?: string; credential?: string }> };
             response = Response.json({ iceServers: turnData.iceServers?.length ? turnData.iceServers : fallbackIceServers, turnConfigured: Boolean(turnData.iceServers?.some((server) => String(server.urls).includes('turn:') || (Array.isArray(server.urls) && server.urls.some((url) => url.startsWith('turn:') || url.startsWith('turns:'))))) });
           } catch (error) {
             console.error('TURN credentials unavailable:', error);
