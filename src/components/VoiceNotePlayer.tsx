@@ -12,10 +12,12 @@ export const VoiceNotePlayer: React.FC<VoiceNotePlayerProps> = ({ audioUrl, isSe
   const [currentTime, setCurrentTime] = useState(0);
   const [loadError, setLoadError] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [waveform, setWaveform] = useState<number[]>([35,60,85,45,95,70,40,80,100,65,50,90,75,40,60,85,50,70]);
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   useEffect(() => {
     const audio = new Audio(audioUrl);
+    audio.preload = 'metadata';
     audioRef.current = audio;
 
     setLoadError(false);
@@ -40,12 +42,43 @@ export const VoiceNotePlayer: React.FC<VoiceNotePlayerProps> = ({ audioUrl, isSe
       setIsPlaying(false);
     };
 
+    let cancelled = false;
+    const decodeWaveform = async () => {
+      try {
+        const response = await fetch(audioUrl);
+        if (!response.ok) return;
+        const bytes = await response.arrayBuffer();
+        const AudioContextType = window.AudioContext || (window as any).webkitAudioContext;
+        if (!AudioContextType) return;
+        const context = new AudioContextType();
+        try {
+          const decoded = await context.decodeAudioData(bytes.slice(0));
+          if (cancelled || !decoded.length) return;
+          const samples = decoded.getChannelData(0);
+          const count = 36;
+          const size = Math.max(1, Math.floor(samples.length / count));
+          const bars = Array.from({ length: count }, (_, index) => {
+            let peak = 0;
+            for (let i = index * size; i < Math.min((index + 1) * size, samples.length); i += 1) peak = Math.max(peak, Math.abs(samples[i]));
+            return Math.max(12, Math.round(peak * 100));
+          });
+          setWaveform(bars);
+          if (Number.isFinite(decoded.duration) && decoded.duration > 0) setDuration(decoded.duration);
+        } finally {
+          await context.close().catch(() => undefined);
+        }
+      } catch {
+        // Cross-origin media may prevent decoding; keep the fallback waveform.
+      }
+    };
+    void decodeWaveform();
     audio.addEventListener('loadedmetadata', onLoadedMetadata);
     audio.addEventListener('timeupdate', onTimeUpdate);
     audio.addEventListener('ended', onEnded);
     audio.addEventListener('error', onError);
 
     return () => {
+      cancelled = true;
       audio.pause();
       audio.removeEventListener('loadedmetadata', onLoadedMetadata);
       audio.removeEventListener('timeupdate', onTimeUpdate);
@@ -79,8 +112,7 @@ export const VoiceNotePlayer: React.FC<VoiceNotePlayerProps> = ({ audioUrl, isSe
 
   const progressPercent = duration > 0 ? (currentTime / duration) * 100 : 0;
 
-  // 18 pseudo waveform bars with deterministic heights
-  const bars = [35, 60, 85, 45, 95, 70, 40, 80, 100, 65, 50, 90, 75, 40, 60, 85, 50, 70];
+  const bars = waveform;
 
   return (
     <div className="flex items-center space-x-3 w-56 sm:w-64 select-none py-1">
