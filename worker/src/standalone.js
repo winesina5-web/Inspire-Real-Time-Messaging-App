@@ -1,0 +1,188 @@
+export interface Env {
+  AI?: { run(model: string, input: unknown): Promise<any> };
+  SUPABASE_URL: string;
+  SUPABASE_ANON_KEY: string;
+  ALLOWED_ORIGINS?: string;
+}
+
+const MODEL = '@cf/meta/llama-3.1-8b-instruct-fast';
+const DEFAULT_ORIGINS = [
+  'https://inspire-real-time-messaging-app.pages.dev',
+  'http://localhost:5173',
+  'http://localhost:3000',
+  'http://127.0.0.1:3000',
+];
+
+function cors(request: Request, env: Env): Headers {
+  const origin = request.headers.get('Origin') || '';
+  const allowed = [...DEFAULT_ORIGINS, ...(env.ALLOWED_ORIGINS || '').split(',').map((v) => v.trim()).filter(Boolean)];
+  const headers = new Headers({
+    'Vary': 'Origin',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Authorization, Content-Type, X-Requested-With',
+    'Access-Control-Max-Age': '86400',
+  });
+  if (origin && allowed.includes(origin)) headers.set('Access-Control-Allow-Origin', origin);
+  return headers;
+}
+
+function json(data: unknown, status = 200, headers?: Headers): Response {
+  const h = new Headers(headers);
+  h.set('Content-Type', 'application/json; charset=utf-8');
+  return new Response(JSON.stringify(data), { status, headers: h });
+}
+
+async function requireUser(request: Request, env: Env): Promise<any | null> {
+  const auth = request.headers.get('Authorization') || '';
+  if (!auth.startsWith('Bearer ') || !env.SUPABASE_URL || !env.SUPABASE_ANON_KEY) return null;
+  const response = await fetch(`${env.SUPABASE_URL}/auth/v1/user`, {
+    headers: { apikey: env.SUPABASE_ANON_KEY, Authorization: auth },
+  });
+  if (!response.ok) return null;
+  return await response.json();
+}
+
+async function ask(env: Env, system: string, prompt: string, maxTokens = 180): Promise<string> {
+  if (!env.AI) throw new Error('Workers AI binding is missing on inspire-worker.');
+  const result = await env.AI.run(MODEL, {
+    messages: [{ role: 'system', content: system }, { role: 'user', content: prompt.slice(0, 12000) }],
+    max_tokens: maxTokens,
+  });
+  const text = typeof result?.response === 'string' ? result.response : '';
+  if (!text.trim()) throw new Error('Workers AI returned an empty response.');
+  return text.trim();
+}
+
+function parseJson<T>(text: string, fallback: T): T {
+  const cleaned = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+  try { return JSON.parse(cleaned) as T; } catch {
+    const start = cleaned.indexOf('[');
+    const end = cleaned.lastIndexOf(']');
+    if (start >= 0 && end > start) {
+      try { return JSON.parse(cleaned.slice(start, end + 1)) as T; } catch { /* use fallback */ }
+    }
+    const objectStart = cleaned.indexOf('{');
+    const objectEnd = cleaned.lastIndexOf('}');
+    if (objectStart >= 0 && objectEnd > objectStart) {
+      try { return JSON.parse(cleaned.slice(objectStart, objectEnd + 1)) as T; } catch { /* use fallback */ }
+    }
+    return fallback;
+  }
+}
+
+export default {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    const headers = cors(request, env);
+    if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers });
+    const url = new URL(request.url);
+    if (url.pathname === '/api/health') return json({ status: 'ok', worker: 'inspire-worker', ai_bound: Boolean(env.AI), time: new Date().toISOString() }, 200, headers);
+    if (request.method !== 'POST') return json({ error: 'Method not allowed' }, 405, headers);
+
+    const user = await requireUser(request, env).catch(() => null);
+    if (!user?.id) return json({ error: 'Unauthorized: valid Supabase session required' }, 401, headers);
+
+    const body = await request.json().catch(() => ({})) as Record<string, any>;
+    try {
+      switch (url.pathname) {
+        case '/api/ai/smart-reply': {
+          const text = String(body.message_text || '').trim();
+          if (!text) return json({ suggestions: [] }, 200, headers);
+          const output = await ask(env, 'Suggest exactly 3 concise, natural replies, each under 8 words. Return only a JSON array of strings.', text, 100);
+          return json({ suggestions: parseJson<string[]>(output, output.split('\n').filter(Boolean).slice(0, 3)) }, 200, headers);
+        }
+        case '/api/ai/assistant': {
+          const messages = Array.isArray(body.messages) ? body.messages.slice(-10) : [];
+          const reply = await ask(env, 'You are Inspire Assistant, a concise and helpful assistant inside a messaging app.', messages.map((m: any) => `${m.role || 'user'}: ${String(m.content || '')}`).join('\n'), 220);
+          return json({ reply }, 200, headers);
+        }
+        case '/api/ai/summarize': {
+          const messages = Array.isArray(body.messages) ? body.messages.slice(-30) : [];
+          const summary = await ask(env, 'Summarize the conversation in concise bullet points. Do not invent details.', messages.map((m: any) => `${m.sender || 'User'}: ${m.content || ''}`).join('\n'), 180);
+          return json({ summary }, 200, headers);
+        }
+        case '/api/ai/translate': {
+          const text = String(body.message_text || '');
+          const target = String(body.target_lang || 'en').slice(0, 30);
+          const translated_text = await ask(env, `Translate the user's text into language code/name ${target}. Return only the translation.`, text, 220);
+          return json({ translated_text }, 200, headers);
+        }
+        case '/api/ai/smart-search': {
+          const query = String(body.query || '').toLowerCase();
+          const messages = Array.isArray(body.messages) ? body.messages.slice(0, 100) : [];
+          const matching_ids = messages.filter((m: any) => String(m.content || '').toLowerCase().includes(query)).map((m: any) => m.id).filter(Boolean).slice(0, 20);
+          return json({ matching_ids }, 200, headers);
+        }
+        case '/api/ai/moderate': {
+          const content = String(body.content || '');
+          const output = await ask(env, 'Classify content safety. Return JSON only: {"verdict":"safe"|"flagged_for_review","confidence":0..1}. Flag clear harassment, threats, hate, exploitation, or spam.', content, 60);
+          return json(parseJson(output, { verdict: 'flagged_for_review', confidence: 0.5 }), 200, headers);
+        }
+        case '/api/ai/emoji-suggest': {
+          const output = await ask(env, 'Suggest up to 5 relevant emoji for this message. Return only a JSON array of emoji strings.', String(body.message_text || ''), 60);
+          return json({ emojis: parseJson<string[]>(output, ['🙂']) }, 200, headers);
+        }
+        case '/api/ai/tone-check': {
+          const output = await ask(env, 'Analyze message tone. Return JSON only with keys tone, suggestion, isPositive (boolean).', String(body.text || ''), 80);
+          return json(parseJson(output, { tone: 'neutral', suggestion: '', isPositive: true }), 200, headers);
+        }
+        case '/api/ai/categorize-chat': {
+          const output = await ask(env, 'Choose exactly one category from Work, Personal, Family, Projects, Urgent, General. Return only the category.', (Array.isArray(body.messages) ? body.messages : []).join('\n'), 30);
+          return json({ folder: output.replace(/[^a-zA-Z ]/g, '').trim().slice(0, 30) || 'General' }, 200, headers);
+        }
+        case '/api/ai/notification-summary': {
+          const count = Math.max(0, Number(body.unread_count) || 0);
+          const summary = await ask(env, 'Write one friendly short notification summary without exposing sensitive data.', `Unread messages: ${count}. Samples: ${(body.samples || []).slice(0, 5).join('; ')}`, 60);
+          return json({ summary }, 200, headers);
+        }
+        case '/api/ai/extract-events': {
+          const output = await ask(env, 'Extract calendar events from this text. Return only JSON array of objects with title, time, description. If none, return [].', String(body.text || ''), 160);
+          return json({ events: parseJson(output, []) }, 200, headers);
+        }
+        case '/api/ai/sentiment': {
+          const output = await ask(env, 'Analyze conversation mood. Return JSON only: {"mood_label":"short label","mood_emoji":"emoji","breakdown":{"positive":0,"neutral":0,"negative":0},"gradient_start":"#0E2A6E","gradient_end":"#FFD700"}. Percentages total 100.', (Array.isArray(body.messages) ? body.messages : []).join('\n'), 100);
+          return json(parseJson(output, { mood_label: 'Neutral', mood_emoji: '💬', breakdown: { positive: 33, neutral: 34, negative: 33 }, gradient_start: '#0E2A6E', gradient_end: '#FFD700' }), 200, headers);
+        }
+        case '/api/ai/smart-compose': {
+          const partial = String(body.partial_text || '');
+          const system = body.mode === 'grammar_fix' ? 'Correct grammar and punctuation only. Return corrected text only.' : 'Continue the user draft naturally. Return only the suggested continuation.';
+          return json({ completion: await ask(env, system, partial, 100) }, 200, headers);
+        }
+        case '/api/ai/voice-summary': {
+          const summary = await ask(env, 'Summarize this voice-note transcript in one or two sentences.', String(body.transcript || ''), 100);
+          return json({ summary }, 200, headers);
+        }
+        case '/api/ai/transcribe': {
+          const key = String(body.object_key || body.media_url || '');
+          if (!key) return json({ error: 'object_key is required' }, 400, headers);
+          const signed = await fetch(`${env.SUPABASE_URL}/storage/v1/object/sign/inspire-media/${key.split('/').map(encodeURIComponent).join('/')}`, {
+            method: 'POST',
+            headers: { apikey: env.SUPABASE_ANON_KEY, Authorization: request.headers.get('Authorization') || '', 'Content-Type': 'application/json' },
+            body: JSON.stringify({ expiresIn: 300 }),
+          });
+          if (!signed.ok) return json({ error: 'Could not access audio media for transcription' }, 403, headers);
+          const signedData = await signed.json() as { signedURL?: string };
+          const audioUrl = signedData.signedURL?.startsWith('http') ? signedData.signedURL : `${env.SUPABASE_URL}/storage/v1${signedData.signedURL || ''}`;
+          const audioResponse = await fetch(audioUrl);
+          if (!audioResponse.ok) return json({ error: 'Could not download audio media' }, 502, headers);
+          const audio = new Uint8Array(await audioResponse.arrayBuffer());
+          const result = await env.AI?.run('@cf/openai/whisper-large-v3-turbo', { audio: [...audio] });
+          return json({ transcript: result?.text || result?.transcription || '' }, 200, headers);
+        }
+        case '/api/ai/image-enhance':
+        case '/api/image/enhance': {
+          return json({ error: 'Image enhancement model is not enabled for this account yet.' }, 501, headers);
+        }
+        case '/api/calls/turn-credentials':
+          return json({ iceServers: [{ urls: 'stun:stun.cloudflare.com:3478' }, { urls: 'stun:stun.l.google.com:19302' }] }, 200, headers);
+        case '/api/link-preview':
+          return json({ error: 'Link preview endpoint is not included in this first deployment.' }, 501, headers);
+        case '/api/gif-search':
+          return json({ gifs: [] }, 200, headers);
+        default:
+          return json({ error: 'Endpoint not found', path: url.pathname }, 404, headers);
+      }
+    } catch (error) {
+      return json({ error: 'AI request failed', details: error instanceof Error ? error.message : String(error) }, 502, headers);
+    }
+  },
+};
