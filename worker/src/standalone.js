@@ -162,7 +162,7 @@ export default {
           const transcript = String(result?.text || result?.transcription || '').trim();
           if (url.pathname === '/api/ai/auto-caption') {
             const safeTranscript = transcript.replace(/-->/g, '—>').replace(/\r?\n/g, ' ').trim();
-            const vtt = safeTranscript ? `WEBVTT\\n\\n00:00:00.000 --> 00:00:30.000\\n${safeTranscript}\\n` : 'WEBVTT\\n';
+            const vtt = safeTranscript ? `WEBVTT\n\n00:00:00.000 --> 00:00:30.000\n${safeTranscript}\n` : 'WEBVTT\n';
             return json({ vtt, transcript }, 200, headers);
           }
           return json({ transcript }, 200, headers);
@@ -184,7 +184,7 @@ export default {
           });
           if (!response.ok) return json({ error: 'Could not export this conversation.' }, 502, headers);
           const messages = await response.json();
-          const output = body.format === 'json' ? JSON.stringify(messages, null, 2) : messages.map((message) => `[${message.created_at}] ${message.sender_id === user.id ? 'You' : 'Contact'}: ${message.content || `[${message.message_type || 'media'}: ${message.media_name || ''}]`}`).join('\\n');
+          const output = body.format === 'json' ? JSON.stringify(messages, null, 2) : messages.map((message) => `[${message.created_at}] ${message.sender_id === user.id ? 'You' : 'Contact'}: ${message.content || `[${message.message_type || 'media'}: ${message.media_name || ''}]`}`).join('\n');
           const bytes = new TextEncoder().encode(output);
           let binary = '';
           for (const byte of bytes) binary += String.fromCharCode(byte);
