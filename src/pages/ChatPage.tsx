@@ -1617,9 +1617,9 @@ export const ChatPage: React.FC = () => {
                 }}
                 onKeyDown={handleKeyDown}
                 placeholder={isAnonymousSend ? 'Type anonymous message…' : 'Type a message…'}
-                className={`w-full min-h-[42px] max-h-36 resize-none px-3.5 py-2.5 rounded-2xl bg-white/10 border ${
+                className={`w-full min-h-[42px] max-h-36 resize-none px-3.5 py-2.5 rounded-2xl bg-white dark:bg-[#1A2234] border ${
                   isAnonymousSend ? 'border-amber-500/60' : 'border-[#E5E7EB] dark:border-[#2A3348]'
-                } text-black dark:text-white font-medium text-sm focus:outline-none focus:border-[#0E2A6E] dark:focus:border-[#3D6FE0]`}
+                } text-[#111827] dark:text-white placeholder:text-[#6B7280] dark:placeholder:text-[#9CA3AF] font-medium text-sm focus:outline-none focus:border-[#0E2A6E] dark:focus:border-[#3D6FE0]`}
               />
               {smartComposeGhost && (
                 <div
