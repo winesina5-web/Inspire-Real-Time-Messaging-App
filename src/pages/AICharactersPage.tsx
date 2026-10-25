@@ -30,7 +30,9 @@ async function compressAvatar(file: File): Promise<string> {
   if (!context) throw new Error('Could not process this image.');
   context.drawImage(source, 0, 0, canvas.width, canvas.height);
   source.close();
-  return canvas.toDataURL('image/jpeg', 0.78);
+  const dataUrl = canvas.toDataURL('image/jpeg', 0.78);
+  if (dataUrl.length > 180000) throw new Error('This picture is still too large after compression. Choose a smaller image.');
+  return dataUrl;
 }
 
 export const AICharactersPage: React.FC = () => {
