@@ -130,7 +130,7 @@ export const GroupChatPage: React.FC = () => {
               is_deleted_receiver: false, is_read: true, read_at: null, created_at: data.created_at,
               edited_at: data.edited_at, thread_reply_count: data.thread_reply_count || 0, reactions: [],
               ai_character_id: data.ai_character_id, ai_character_name: data.ai_character_name,
-              ai_character_avatar_url: localCharacter?.avatarUrl || data.ai_character_avatar_url || null,
+              ai_character_avatar_url: localCharacter?.avatarUrl || character.avatar_url || data.ai_character_avatar_url || null,
             };
             setMessages((current) => current.some((item) => item.id === mapped.id) ? current : [...current, mapped]);
           }
@@ -250,7 +250,7 @@ export const GroupChatPage: React.FC = () => {
                 reactions: [],
                 ai_character_id: m.ai_character_id || null,
                 ai_character_name: m.ai_character_name || null,
-                ai_character_avatar_url: m.ai_character_avatar_url || loadCharacters(user.id).find((character) => character.id === m.ai_character_id)?.avatarUrl || null,
+                ai_character_avatar_url: m.ai_character_avatar_url || loadCharacters(user.id).find((character) => character.id === m.ai_character_id)?.avatarUrl || groupAICharactersRef.current.find((character) => character.character_id === m.ai_character_id)?.avatar_url || null,
               }));
             // Preserve realtime messages that may arrive while the initial query is in flight.
             setMessages((current) => {
@@ -317,7 +317,7 @@ export const GroupChatPage: React.FC = () => {
                   reactions: [],
                   ai_character_id: newM.ai_character_id || null,
                   ai_character_name: newM.ai_character_name || null,
-                  ai_character_avatar_url: newM.ai_character_avatar_url || loadCharacters(user.id).find((character) => character.id === newM.ai_character_id)?.avatarUrl || null,
+                  ai_character_avatar_url: newM.ai_character_avatar_url || loadCharacters(user.id).find((character) => character.id === newM.ai_character_id)?.avatarUrl || groupAICharactersRef.current.find((character) => character.character_id === newM.ai_character_id)?.avatar_url || null,
                 },
               ];
             });
