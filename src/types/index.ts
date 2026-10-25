@@ -256,7 +256,7 @@ export interface CallRecord {
   callee_id?: string | null;
   group_id?: string | null;
   type: 'voice' | 'video';
-  status: 'missed' | 'answered' | 'declined';
+  status: 'ringing' | 'missed' | 'answered' | 'declined';
   started_at: string;
   ended_at?: string | null;
   duration_seconds: number;
