@@ -922,9 +922,9 @@ export const ChatPage: React.FC = () => {
 
           <div className="min-w-0 flex flex-col justify-center">
             <div className="flex items-center space-x-1.5 truncate">
-              <h2 className="font-extrabold text-sm text-black dark:text-white truncate leading-tight">
+              <button type="button" onClick={() => { setContactAliasDraft(partnerProfile?.display_name || ''); setShowContactProfile(true); }} className="font-extrabold text-sm text-white truncate leading-tight text-left">
                 {partnerLoading ? 'Loading…' : partnerProfile?.display_name}
-              </h2>
+              </button>
               {/* Feature 116 Verified Badge */}
               {partnerProfile?.verified && (
                 <span className="text-[#0E2A6E] dark:text-[#3D6FE0] font-black text-xs shrink-0" title="Verified Member">
