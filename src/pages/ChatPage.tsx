@@ -1091,7 +1091,7 @@ export const ChatPage: React.FC = () => {
       <main
         ref={chatScrollContainerRef}
         onScroll={handleScroll}
-        className={`flex-1 overflow-y-auto px-4 py-3 space-y-1 relative transition-colors ${
+        className={`flex-1 min-h-0 overflow-y-auto overscroll-contain touch-pan-y px-4 py-3 space-y-1 relative transition-colors ${
           wallpaperClasses[wallpaperPreset] || wallpaperClasses.default
         }`}
       >
