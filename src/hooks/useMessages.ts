@@ -149,7 +149,13 @@ export function useMessages(partnerId: string) {
             (newMsg.sender_id === user.id && newMsg.receiver_id === partnerId) ||
             (newMsg.sender_id === partnerId && newMsg.receiver_id === user.id);
 
-          if (isThisChat) {
+          const now = Date.now();
+          // A scheduled message is visible only to its sender until the release
+          // time. Expired messages should never be inserted into the local chat.
+          const isSender = newMsg.sender_id === user.id;
+          const isReleased = !newMsg.scheduled_for || Date.parse(newMsg.scheduled_for) <= now;
+          const isNotExpired = !newMsg.expires_at || Date.parse(newMsg.expires_at) > now;
+          if (isThisChat && isNotExpired && (isSender || isReleased)) {
             setMessages((prev) => {
               // Realtime can arrive before insert() resolves, so reconcile by
               // conversation payload as well as database ID to avoid duplicates.
