@@ -10,6 +10,7 @@ import { useVoiceRecorder } from '../hooks/useVoiceRecorder';
 import { useAI } from '../hooks/useAI';
 import { useToast } from '../components/Toast';
 import { Avatar } from '../components/Avatar';
+import { CallModal } from '../components/CallModal';
 import { MessageBubble } from '../components/MessageBubble';
 import { TypingIndicator } from '../components/TypingIndicator';
 import { MoodBanner } from '../components/MoodBanner';
@@ -57,6 +58,8 @@ export const ChatPage: React.FC = () => {
   const [showContactProfile, setShowContactProfile] = useState(false);
   const [contactAliasDraft, setContactAliasDraft] = useState('');
   const [isSavingAlias, setIsSavingAlias] = useState(false);
+  const [activeCall, setActiveCall] = useState<{ partner: Profile; type: 'voice' | 'video'; callId: string } | null>(null);
+  const [isStartingCall, setIsStartingCall] = useState(false);
   const [isBlocked, setIsBlocked] = useState(false); // True only when the current user has blocked this contact.
 
   // Messaging hooks
@@ -269,6 +272,47 @@ export const ChatPage: React.FC = () => {
 
     fetchPartner();
   }, [partnerId, user]);
+
+  const handleStartChatCall = async (type: 'voice' | 'video') => {
+    if (!user || !partnerId || !partnerProfile || !isConfigured) {
+      toast('Calls require a signed-in account and a loaded contact profile.', 'error');
+      return;
+    }
+    if (isBlocked) {
+      toast('Unblock this contact before calling.', 'error');
+      return;
+    }
+    if (isStartingCall || activeCall) return;
+    setIsStartingCall(true);
+    try {
+      const { data, error } = await supabase.from('calls').insert({
+        caller_id: user.id,
+        callee_id: partnerId,
+        type,
+        status: 'ringing',
+        started_at: new Date().toISOString(),
+      }).select('*').single();
+      if (error || !data) throw error || new Error('Could not create the call record.');
+      setActiveCall({ partner: partnerProfile, type, callId: data.id });
+    } catch (error) {
+      console.error('Could not start chat call:', error);
+      toast(error instanceof Error ? error.message : 'Could not start call. Please try again.', 'error');
+    } finally {
+      setIsStartingCall(false);
+    }
+  };
+
+  const handleFinishChatCall = async (duration: number) => {
+    if (activeCall && user) {
+      const { error } = await supabase.from('calls').update({
+        status: duration > 0 ? 'answered' : 'missed',
+        ended_at: new Date().toISOString(),
+        duration_seconds: duration,
+      }).eq('id', activeCall.callId);
+      if (error) console.warn('Could not finalize call history:', error);
+    }
+    setActiveCall(null);
+  };
 
   // Network Quality check on load (Feature 126)
   useEffect(() => {
@@ -963,8 +1007,8 @@ export const ChatPage: React.FC = () => {
             <Search size={18} />
           </button>
 
-          <button type="button" onClick={() => navigate('/calls?contact=' + encodeURIComponent(partnerId || '') + '&mode=voice')} className="p-2 rounded-full hover:bg-white/10 text-white" aria-label="Voice call" title="Voice call"><Phone size={18} /></button>
-          <button type="button" onClick={() => navigate('/calls?contact=' + encodeURIComponent(partnerId || '') + '&mode=video')} className="p-2 rounded-full hover:bg-white/10 text-white" aria-label="Video call" title="Video call"><Video size={18} /></button>
+          <button type="button" disabled={isStartingCall || Boolean(activeCall)} onClick={() => void handleStartChatCall('voice')} className="p-2 rounded-full hover:bg-white/10 text-white disabled:opacity-50" aria-label="Voice call" title="Voice call"><Phone size={18} /></button>
+          <button type="button" disabled={isStartingCall || Boolean(activeCall)} onClick={() => void handleStartChatCall('video')} className="p-2 rounded-full hover:bg-white/10 text-white disabled:opacity-50" aria-label="Video call" title="Video call"><Video size={18} /></button>
           <button
             onClick={() => setShowOverflowMenu((prev) => !prev)}
             className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 text-sm font-bold"
@@ -1936,6 +1980,15 @@ export const ChatPage: React.FC = () => {
             </button>
           </div>
         </div>
+      )}
+      {activeCall && (
+        <CallModal
+          callId={activeCall.callId}
+          partner={activeCall.partner}
+          type={activeCall.type}
+          isCaller={true}
+          onEndCall={(duration) => void handleFinishChatCall(duration)}
+        />
       )}
     </div>
   );
