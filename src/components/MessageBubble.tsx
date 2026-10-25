@@ -208,6 +208,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     if (onUpdateGame) onUpdateGame(message.id, gd);
   };
 
+  if (message.expires_at && Date.parse(message.expires_at) <= Date.now()) return null;
+
   if (isDeleted) {
     return (
       <div className={`flex w-full my-1.5 ${isMe ? 'justify-end' : 'justify-start'}`}>
