@@ -27,6 +27,45 @@ export interface LinkPreviewData {
 }
 
 export const workerApi = {
+  /** Generates a character reply without persisting private chat history on the server. */
+  async chatWithCharacter(input: {
+    name: string;
+    role: string;
+    behavior: string;
+    scenario: string;
+    speakingStyle: string;
+    language: string;
+    sampleDialogue?: string;
+    temperature?: number;
+    responseLength?: 'short' | 'balanced' | 'detailed';
+    message: string;
+    history: Array<{ role: 'user' | 'assistant'; content: string }>;
+  }): Promise<{ reply: string; model?: string }> {
+    if (!WORKER_BASE) throw new Error('AI Character chat needs the configured Cloudflare Worker API.');
+    const token = await getAuthToken();
+    if (!token) throw new Error('Please sign in again to chat with AI Characters.');
+    const response = await fetch(`${WORKER_BASE}/api/ai/character-chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify({
+        name: input.name,
+        role: input.role,
+        behavior: input.behavior,
+        scenario: input.scenario,
+        speaking_style: input.speakingStyle,
+        language: input.language,
+        sample_dialogue: input.sampleDialogue || '',
+        temperature: input.temperature ?? 0.8,
+        response_length: input.responseLength || 'balanced',
+        message: input.message,
+        history: input.history.slice(-16),
+      }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || 'The AI character could not reply right now.');
+    if (typeof data.reply !== 'string' || !data.reply.trim()) throw new Error('The AI character returned an empty reply.');
+    return { reply: data.reply, model: data.model };
+  },
   /**
    * Uploads media to the authenticated user's private Supabase Storage folder.
    */
