@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from
 import { AuthProvider, useAuth } from './hooks/useAuth';
 import { ToastProvider } from './components/Toast';
 import { InstallPrompt } from './components/InstallPrompt';
+import { IncomingCallListener } from './components/IncomingCallListener';
 
 import { LoginPage } from './pages/LoginPage';
 import { SignupPage } from './pages/SignupPage';
@@ -430,6 +431,7 @@ function AppRoutes() {
       {/* Catch-all redirect */}
       <Route path="*" element={<Navigate to="/chats" replace />} />
     </Routes>
+    <IncomingCallListener />
   );
 }
 
