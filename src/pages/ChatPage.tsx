@@ -448,7 +448,7 @@ export const ChatPage: React.FC = () => {
       return;
     }
 
-    const sent = await sendMessage(text, 'text', undefined, replyId);
+    const sent = await sendMessage(text, 'text', undefined, replyId, undefined, expiresAt || undefined);
     if (!sent) {
       toast('Message could not be sent. Tap Retry on the message when the connection is back.', 'error');
     }
