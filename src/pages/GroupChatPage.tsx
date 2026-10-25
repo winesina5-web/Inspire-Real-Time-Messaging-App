@@ -70,7 +70,7 @@ export const GroupChatPage: React.FC = () => {
     if (processingGroupMessageIdsRef.current.has(newMessage.id)) return;
     processingGroupMessageIdsRef.current.add(newMessage.id);
     try {
-      const active = groupAICharactersRef.current.filter((character) => character.is_active && character.added_by === user.id);
+      const active = groupAICharactersRef.current.filter((character) => character.is_active);
       if (!active.length) return;
       const text = String(newMessage.content).slice(0, 2000);
       const mentions = (character: GroupAICharacter) => text.toLocaleLowerCase().includes(character.name.toLocaleLowerCase());
@@ -80,11 +80,21 @@ export const GroupChatPage: React.FC = () => {
       const chosen = [...mentioned, ...eligible.filter((item) => !mentioned.some((m) => m.id === item.id))].slice(0, 2);
       for (const character of chosen) {
         const lockKey = `inspire_group_ai_lock:${groupId}:${newMessage.id}:${character.character_id}`;
+        let claimAcquired = false;
         try {
           const existing = localStorage.getItem(lockKey);
           if (existing && Date.now() - Number(existing) < 10 * 60 * 1000) continue;
           localStorage.setItem(lockKey, String(Date.now()));
         } catch { /* continue in-memory if storage is unavailable */ }
+        const { error: claimError } = await supabase.from('group_ai_reply_claims').insert({
+          group_id: groupId, message_id: newMessage.id, group_ai_character_id: character.id, claimed_by: user.id,
+        });
+        if (claimError) {
+          try { localStorage.removeItem(lockKey); } catch { /* ignore */ }
+          if (claimError.code !== '23505') console.warn('Could not claim group AI reply:', claimError.message);
+          continue;
+        }
+        claimAcquired = true;
         const context = [...messagesRef.current].filter((message) => message.id !== newMessage.id && message.content).slice(-10).map((message) => ({
           role: message.ai_character_id === character.character_id ? 'assistant' as const : 'user' as const,
           content: `${message.ai_character_name || (message.sender_id === user.id ? 'You' : 'Group member')}: ${String(message.content).slice(0, 700)}`,
@@ -100,6 +110,8 @@ export const GroupChatPage: React.FC = () => {
             history: context, groupMode: character.trigger_mode !== 'every_message',
           });
           if (!result.shouldReply || !result.reply.trim()) {
+            await supabase.from('group_ai_reply_claims').delete().eq('group_id', groupId).eq('message_id', newMessage.id).eq('group_ai_character_id', character.id).eq('claimed_by', user.id);
+            claimAcquired = false;
             try { localStorage.removeItem(lockKey); } catch { /* ignore */ }
             continue;
           }
@@ -125,6 +137,9 @@ export const GroupChatPage: React.FC = () => {
           await supabase.from('group_ai_characters').update({ last_spoke_at: new Date().toISOString() }).eq('id', character.id).eq('added_by', user.id);
         } catch (error) {
           console.warn('Group AI reply failed:', error);
+          if (claimAcquired) {
+            await supabase.from('group_ai_reply_claims').delete().eq('group_id', groupId).eq('message_id', newMessage.id).eq('group_ai_character_id', character.id).eq('claimed_by', user.id);
+          }
           try { localStorage.removeItem(lockKey); } catch { /* ignore */ }
         }
       }
