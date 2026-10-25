@@ -53,6 +53,9 @@ export const ChatPage: React.FC = () => {
 
   const [partnerProfile, setPartnerProfile] = useState<Profile | null>(null);
   const [partnerLoading, setPartnerLoading] = useState(true);
+  const [showContactProfile, setShowContactProfile] = useState(false);
+  const [contactAliasDraft, setContactAliasDraft] = useState('');
+  const [isSavingAlias, setIsSavingAlias] = useState(false);
   const [isBlocked, setIsBlocked] = useState(false); // True only when the current user has blocked this contact.
 
   // Messaging hooks
