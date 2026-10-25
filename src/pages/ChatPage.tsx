@@ -396,7 +396,22 @@ export const ChatPage: React.FC = () => {
     setReplyingTo(null);
 
     if (scheduledTimeString) {
-      toast(`Message scheduled for ${new Date(scheduledTimeString).toLocaleTimeString()}`, 'info');
+      const scheduledDate = new Date(scheduledTimeString);
+      if (!Number.isFinite(scheduledDate.getTime()) || scheduledDate.getTime() <= Date.now()) {
+        setInputText(text);
+        toast('Choose a future time to schedule this message.', 'error');
+        setScheduledTimeString(null);
+        return;
+      }
+
+      const scheduledFor = scheduledDate.toISOString();
+      const scheduledMessage = await sendMessage(text, 'text', undefined, replyId, scheduledFor);
+      if (!scheduledMessage) {
+        setInputText(text);
+        toast('Scheduled message could not be saved. Please try again.', 'error');
+      } else {
+        toast(`Message scheduled for ${scheduledDate.toLocaleString()}`, 'success');
+      }
       setScheduledTimeString(null);
       return;
     }
