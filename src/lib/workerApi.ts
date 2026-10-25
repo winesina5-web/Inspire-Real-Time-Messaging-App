@@ -171,7 +171,7 @@ export const workerApi = {
   },
 
   // Feature 13-15: TURN / WebRTC Credentials
-  async getTurnCredentials(): Promise<{ iceServers: RTCIceServer[] }> {
+  async getTurnCredentials(): Promise<{ iceServers: RTCIceServer[]; turnConfigured?: boolean }> {
     if (WORKER_BASE) {
       const token = await getAuthToken();
       try {
