@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Message, PollData, GameData, PaymentSplit, GroupEvent, MusicCardData } from '../types';
 import {
   isMessageDeletedForViewer,
@@ -63,6 +63,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const isDeleted = isMessageDeletedForViewer(message, currentUserId);
   const [showReactionsPicker, setShowReactionsPicker] = useState(false);
   const [showActionsMenu, setShowActionsMenu] = useState(false);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const touchMovedRef = useRef(false);
+  const clearLongPress = () => { if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current); longPressTimerRef.current = null; };
   const [resolvedMediaUrl, setResolvedMediaUrl] = useState<string>(message.media_url || '');
   const [transcript, setTranscript] = useState<string | null>(null);
   const [isTranscribing, setIsTranscribing] = useState(false);
@@ -217,7 +220,18 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   });
 
   return (
-    <div className={`group relative flex w-full my-1.5 ${isMe ? 'justify-end' : 'justify-start'}`}>
+    <div
+      className={`group relative flex w-full my-1.5 ${isMe ? 'justify-end' : 'justify-start'}`}
+      onContextMenu={(event) => { event.preventDefault(); setShowActionsMenu(true); }}
+      onTouchStart={() => {
+        touchMovedRef.current = false;
+        clearLongPress();
+        longPressTimerRef.current = setTimeout(() => setShowActionsMenu(true), 500);
+      }}
+      onTouchMove={() => { touchMovedRef.current = true; clearLongPress(); }}
+      onTouchEnd={clearLongPress}
+      onTouchCancel={clearLongPress}
+    >
       <div className="relative max-w-[85%] sm:max-w-[75%] flex flex-col">
         {/* Feature 125: Anonymous Message Header */}
         {message.is_anonymous && (
