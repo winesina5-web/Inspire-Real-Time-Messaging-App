@@ -81,12 +81,15 @@ export function useMessages(partnerId: string) {
   const { user } = useAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isLoadingOlder, setIsLoadingOlder] = useState(false);
+  const [hasMoreMessages, setHasMoreMessages] = useState(true);
   const messagesRef = useRef<Message[]>([]);
   messagesRef.current = messages;
 
   const loadMessages = useCallback(async () => {
     if (!user || !partnerId) {
       setMessages([]);
+      setHasMoreMessages(false);
       setIsLoading(false);
       return;
     }
@@ -95,6 +98,7 @@ export function useMessages(partnerId: string) {
       // Local seed messages
       const seeded = SEED_MESSAGES[partnerId] || SEED_MESSAGES.partner_jordan || [];
       setMessages(seeded);
+      setHasMoreMessages(false);
       setIsLoading(false);
       return;
     }
@@ -119,6 +123,7 @@ export function useMessages(partnerId: string) {
         console.warn('Failed to load messages:', error);
       } else if (data) {
         setMessages((data as Message[]).reverse());
+        setHasMoreMessages(data.length === 100);
       }
     } catch (err) {
       console.warn('Message fetch exception:', err);
@@ -236,6 +241,39 @@ export function useMessages(partnerId: string) {
       supabase.removeChannel(channel);
     };
   }, [user, partnerId, loadMessages]);
+
+  const loadOlderMessages = useCallback(async () => {
+    if (!user || !partnerId || !isConfigured || isLoadingOlder || !hasMoreMessages) return;
+    const oldest = messagesRef.current[0];
+    if (!oldest?.created_at) { setHasMoreMessages(false); return; }
+    setIsLoadingOlder(true);
+    try {
+      const { data, error } = await supabase
+        .from('messages')
+        .select(`
+          *,
+          reply_to:reply_to_id (*),
+          reactions (*)
+        `)
+        .or(`and(sender_id.eq.${user.id},receiver_id.eq.${partnerId}),and(sender_id.eq.${partnerId},receiver_id.eq.${user.id})`)
+        .lt('created_at', oldest.created_at)
+        .order('created_at', { ascending: false })
+        .limit(100);
+      if (error) throw error;
+      const older = ((data || []) as Message[]).reverse();
+      setHasMoreMessages(older.length === 100);
+      if (older.length) {
+        setMessages((current) => {
+          const existing = new Set(current.map((message) => message.id));
+          return [...older.filter((message) => !existing.has(message.id)), ...current];
+        });
+      }
+    } catch (error) {
+      console.warn('Failed to load older messages:', error);
+    } finally {
+      setIsLoadingOlder(false);
+    }
+  }, [user, partnerId, isLoadingOlder, hasMoreMessages]);
 
   const addLocalMessage = useCallback((msg: Message) => {
     setMessages((prev) => {
@@ -436,5 +474,8 @@ export function useMessages(partnerId: string) {
     addLocalMessage,
     removeLocalMessage,
     refreshMessages: loadMessages,
+    loadOlderMessages,
+    isLoadingOlder,
+    hasMoreMessages,
   };
 }
