@@ -90,7 +90,7 @@ export const CallModal: React.FC<CallModalProps> = ({ callId, partner, type, isC
           await sendSignal('answer', { sdp: pc.localDescription });
           await supabase.from('calls').update({ status: 'answered' }).eq('id', callId);
         } else if (signal.event_type === 'answer' && isCaller) {
-          if (!pc.currentRemoteDescription) {
+          if (pc.signalingState === 'have-local-offer' || !pc.currentRemoteDescription) {
             await pc.setRemoteDescription(new RTCSessionDescription(signal.payload.sdp));
             await applyPendingCandidates(pc);
           }
