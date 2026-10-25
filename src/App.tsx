@@ -431,8 +431,9 @@ function AppRoutes() {
 
       {/* Catch-all redirect */}
       <Route path="*" element={<Navigate to="/chats" replace />} />
-    </Routes>
-    <IncomingCallListener />
+      </Routes>
+      <IncomingCallListener />
+    </>
   );
 }
 
