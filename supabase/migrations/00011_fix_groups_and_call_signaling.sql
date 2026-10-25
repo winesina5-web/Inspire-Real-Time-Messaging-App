@@ -108,6 +108,14 @@ begin
   ) then
     alter publication supabase_realtime add table public.call_signals;
   end if;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public'
+      and tablename = 'calls'
+  ) then
+    alter publication supabase_realtime add table public.calls;
+  end if;
 exception when undefined_object then
   raise notice 'supabase_realtime publication not found; enable call_signals in Realtime publication manually';
 end;
