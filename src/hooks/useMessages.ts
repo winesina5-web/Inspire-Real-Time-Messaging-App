@@ -110,13 +110,15 @@ export function useMessages(partnerId: string) {
         .or(
           `and(sender_id.eq.${user.id},receiver_id.eq.${partnerId}),and(sender_id.eq.${partnerId},receiver_id.eq.${user.id})`
         )
-        .order('created_at', { ascending: true })
+        // Fetch the newest page first; reverse it for chronological rendering.
+        // Ascending + limit(100) accidentally hid all messages after the oldest 100.
+        .order('created_at', { ascending: false })
         .limit(100);
 
       if (error) {
         console.warn('Failed to load messages:', error);
       } else if (data) {
-        setMessages(data as Message[]);
+        setMessages((data as Message[]).reverse());
       }
     } catch (err) {
       console.warn('Message fetch exception:', err);
