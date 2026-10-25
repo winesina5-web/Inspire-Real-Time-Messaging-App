@@ -12,6 +12,8 @@ import { UpdatePasswordPage } from './pages/UpdatePasswordPage';
 import { ChooseUsernamePage } from './pages/ChooseUsernamePage';
 import { ChatListPage } from './pages/ChatListPage';
 import { ChatPage } from './pages/ChatPage';
+import { AICharactersPage } from './pages/AICharactersPage';
+import { AICharacterChatPage } from './pages/AICharacterChatPage';
 import { ProfilePage } from './pages/ProfilePage';
 import { BlockedUsersPage } from './pages/BlockedUsersPage';
 
@@ -229,6 +231,22 @@ function AppRoutes() {
         element={
           <ProtectedRoute>
             <ChatPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/ai-characters"
+        element={
+          <ProtectedRoute>
+            <AICharactersPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/ai-characters/:characterId"
+        element={
+          <ProtectedRoute>
+            <AICharacterChatPage />
           </ProtectedRoute>
         }
       />
