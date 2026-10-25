@@ -59,7 +59,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   onRsvpEvent,
   onRetrySend,
 }) => {
-  const isMe = message.sender_id === currentUserId;
+  const isMe = message.sender_id === currentUserId && !message.ai_character_id;
   const isDeleted = isMessageDeletedForViewer(message, currentUserId);
   const [showReactionsPicker, setShowReactionsPicker] = useState(false);
   const [showActionsMenu, setShowActionsMenu] = useState(false);
