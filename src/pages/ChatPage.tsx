@@ -959,16 +959,18 @@ export const ChatPage: React.FC = () => {
             title="Search conversation"
             aria-label="Search conversation"
           >
-            🔍
+            <Search size={18} />
           </button>
 
+          <button type="button" onClick={() => navigate('/calls?contact=' + encodeURIComponent(partnerId || '') + '&mode=voice')} className="p-2 rounded-full hover:bg-white/10 text-white" aria-label="Voice call" title="Voice call"><Phone size={18} /></button>
+          <button type="button" onClick={() => navigate('/calls?contact=' + encodeURIComponent(partnerId || '') + '&mode=video')} className="p-2 rounded-full hover:bg-white/10 text-white" aria-label="Video call" title="Video call"><Video size={18} /></button>
           <button
             onClick={() => setShowOverflowMenu((prev) => !prev)}
             className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 text-sm font-bold"
             title="Options"
             aria-label="More conversation options"
           >
-            ⋮
+            <MoreVertical size={19} />
           </button>
 
           {/* Header Overflow Dropdown Menu */}
