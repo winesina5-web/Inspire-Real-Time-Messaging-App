@@ -609,6 +609,14 @@ export const ChatListPage: React.FC = () => {
               🔍
             </button>
             <button
+              onClick={() => navigate('/ai-characters')}
+              className="p-2 rounded-full hover:bg-violet-50 dark:hover:bg-violet-950/40 text-sm transition-colors"
+              title="AI Characters"
+              aria-label="AI Characters"
+            >
+              🎭
+            </button>
+            <button
               onClick={handlePullRefresh}
               disabled={isRefreshing}
               className={`p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 text-sm transition-colors ${
