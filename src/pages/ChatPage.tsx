@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
+import { Phone, Video, MoreVertical, Search, Paperclip, Mic, Send, X, Image as ImageIcon, FileAudio } from 'lucide-react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { useMessages } from '../hooks/useMessages';
@@ -53,6 +54,9 @@ export const ChatPage: React.FC = () => {
 
   const [partnerProfile, setPartnerProfile] = useState<Profile | null>(null);
   const [partnerLoading, setPartnerLoading] = useState(true);
+  const [showContactProfile, setShowContactProfile] = useState(false);
+  const [contactAliasDraft, setContactAliasDraft] = useState('');
+  const [isSavingAlias, setIsSavingAlias] = useState(false);
   const [isBlocked, setIsBlocked] = useState(false); // True only when the current user has blocked this contact.
 
   // Messaging hooks
@@ -76,6 +80,7 @@ export const ChatPage: React.FC = () => {
   const {
     isRecording,
     recordingDuration,
+    recordingWaveform,
     startRecording,
     stopRecording,
     cancelRecording,
@@ -350,7 +355,7 @@ export const ChatPage: React.FC = () => {
   }, [inputText, suggestEmojis]);
 
   // Handle typing notification
-  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     setInputText(e.target.value);
     setSmartComposeGhost('');
     notifyTyping();
@@ -438,7 +443,7 @@ export const ChatPage: React.FC = () => {
     }
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     // Feature 98: Tab or ArrowRight accepts smart-compose ghost text
     if ((e.key === 'Tab' || e.key === 'ArrowRight') && smartComposeGhost) {
       e.preventDefault();
@@ -507,8 +512,9 @@ export const ChatPage: React.FC = () => {
         return;
       }
 
+      const caption = inputText.trim();
       const sent = await sendMessage(
-        '',
+        caption,
         type,
         {
           url: result.object_key,
@@ -519,6 +525,7 @@ export const ChatPage: React.FC = () => {
       );
       if (sent) {
         setReplyingTo(null);
+        setInputText('');
         toast('Media sent!', 'success');
       } else {
         toast('Media uploaded, but message delivery failed. Please retry.', 'error');
@@ -835,6 +842,25 @@ export const ChatPage: React.FC = () => {
     setReminderTargetMessage(null);
   };
 
+  const handleSaveContactAlias = async () => {
+    if (!user?.id || !partnerId) return;
+    setIsSavingAlias(true);
+    try {
+      const alias = contactAliasDraft.trim();
+      const { error } = await supabase.from('contacts').upsert({ user_id: user.id, contact_id: partnerId, custom_name: alias || null }, { onConflict: 'user_id,contact_id' });
+      if (error) throw error;
+      setPartnerProfile((current) => current ? { ...current, display_name: alias || current.username || current.display_name } : current);
+      toast('Contact name updated for you only.', 'success');
+    } catch (error) {
+      console.warn('Save contact alias failed:', error);
+      toast('Could not save this contact name. Please try again.', 'error');
+    } finally {
+      setIsSavingAlias(false);
+    }
+  };
+
+  const sharedMedia = messages.filter((message) => ['image', 'video', 'audio', 'voice_note', 'file'].includes(message.message_type) && Boolean(message.media_url));
+
   const partnerIsOnline = partnerId ? isOnline(partnerId) : false;
   const wordCount = inputText.trim().split(/\s+/).filter(Boolean).length;
 
@@ -878,7 +904,7 @@ export const ChatPage: React.FC = () => {
       )}
 
       {/* Chat Top Header */}
-      <header className="flex-shrink-0 z-30 bg-white dark:bg-[#0B0F1A] border-b border-[#E5E7EB] dark:border-[#2A3348] px-3 py-2.5 flex items-center justify-between shadow-xs">
+      <header className="chat-app-header sticky top-0 flex-shrink-0 z-30 px-3 py-2 flex items-center justify-between shadow-sm">
         <div className="flex items-center space-x-2.5 min-w-0">
           <button
             onClick={() => navigate('/chats')}
@@ -898,9 +924,9 @@ export const ChatPage: React.FC = () => {
 
           <div className="min-w-0 flex flex-col justify-center">
             <div className="flex items-center space-x-1.5 truncate">
-              <h2 className="font-extrabold text-sm text-black dark:text-white truncate leading-tight">
+              <button type="button" onClick={() => { setContactAliasDraft(partnerProfile?.display_name || ''); setShowContactProfile(true); }} className="font-extrabold text-sm text-white truncate leading-tight text-left">
                 {partnerLoading ? 'Loading…' : partnerProfile?.display_name}
-              </h2>
+              </button>
               {/* Feature 116 Verified Badge */}
               {partnerProfile?.verified && (
                 <span className="text-[#0E2A6E] dark:text-[#3D6FE0] font-black text-xs shrink-0" title="Verified Member">
@@ -934,16 +960,18 @@ export const ChatPage: React.FC = () => {
             title="Search conversation"
             aria-label="Search conversation"
           >
-            🔍
+            <Search size={18} />
           </button>
 
+          <button type="button" onClick={() => navigate('/calls?contact=' + encodeURIComponent(partnerId || '') + '&mode=voice')} className="p-2 rounded-full hover:bg-white/10 text-white" aria-label="Voice call" title="Voice call"><Phone size={18} /></button>
+          <button type="button" onClick={() => navigate('/calls?contact=' + encodeURIComponent(partnerId || '') + '&mode=video')} className="p-2 rounded-full hover:bg-white/10 text-white" aria-label="Video call" title="Video call"><Video size={18} /></button>
           <button
             onClick={() => setShowOverflowMenu((prev) => !prev)}
             className="p-2 rounded-full hover:bg-gray-100 dark:hover:bg-gray-800 text-sm font-bold"
             title="Options"
             aria-label="More conversation options"
           >
-            ⋮
+            <MoreVertical size={19} />
           </button>
 
           {/* Header Overflow Dropdown Menu */}
@@ -1374,13 +1402,13 @@ export const ChatPage: React.FC = () => {
         </div>
       ) : isRecording ? (
         // Voice Note Live Recording Bar
-        <div className="p-3 bg-[#0E2A6E] text-white flex items-center justify-between animate-slide-up">
+        <div className="chat-app-footer p-3 text-white flex items-center justify-between animate-slide-up">
           <div className="flex items-center space-x-3">
             <span className="w-3.5 h-3.5 rounded-full bg-rose-500 animate-ping" />
             <span className="text-sm font-extrabold tracking-wider">
               {formatDuration(recordingDuration)}
             </span>
-            <span className="text-xs text-blue-200">Recording voice note…</span>
+            <span className="text-xs text-white/75">Recording…</span><div className="flex h-8 items-center gap-[2px] min-w-0 flex-1 mx-2" aria-label="Live microphone waveform">{recordingWaveform.map((level, index) => <span key={index} className="w-[3px] rounded-full bg-[#FFD700] transition-all duration-75" style={{ height: `${Math.max(3, level * 0.28)}px` }} />)}</div>
           </div>
           <div className="flex items-center space-x-2">
             <button
@@ -1400,7 +1428,7 @@ export const ChatPage: React.FC = () => {
           </div>
         </div>
       ) : (
-        <footer className="p-3 bg-white dark:bg-[#0B0F1A] border-t border-[#E5E7EB] dark:border-[#2A3348] relative">
+        <footer className="chat-app-footer p-2 border-t relative">
           {isPartnerTyping && (
             <div className="max-w-3xl mx-auto mb-2 px-3 py-1 text-xs font-semibold text-[#4B5563] dark:text-[#9CA3AF]" aria-live="polite">
               <TypingIndicator className="text-xs" />
@@ -1532,17 +1560,20 @@ export const ChatPage: React.FC = () => {
 
             {/* Soft-filled text input with Feature 98 Ghost Text Autocomplete */}
             <div className="relative flex-1">
-              <input
-                type="text"
+              <textarea
+                rows={1}
                 spellCheck="true"
                 value={inputText}
                 onChange={(event) => {
                   handleInputChange(event);
+                  event.currentTarget.style.height = 'auto';
+                  event.currentTarget.style.height = `${Math.min(event.currentTarget.scrollHeight, 144)}px`;
+                  event.currentTarget.style.overflowY = event.currentTarget.scrollHeight > 144 ? 'auto' : 'hidden';
                   if (event.target.value.trim()) notifyTyping();
                 }}
                 onKeyDown={handleKeyDown}
-                placeholder={isAnonymousSend ? 'Type anonymous message…' : 'Type a message… (Enter to send, Tab to complete)'}
-                className={`w-full px-4 py-2.5 rounded-2xl bg-[#F5F7FA] dark:bg-[#1A2234] border ${
+                placeholder={isAnonymousSend ? 'Type anonymous message…' : 'Type a message…'}
+                className={`w-full min-h-[42px] max-h-36 resize-none px-3.5 py-2.5 rounded-2xl bg-white/10 border ${
                   isAnonymousSend ? 'border-amber-500/60' : 'border-[#E5E7EB] dark:border-[#2A3348]'
                 } text-black dark:text-white font-medium text-sm focus:outline-none focus:border-[#0E2A6E] dark:focus:border-[#3D6FE0]`}
               />
@@ -1561,7 +1592,7 @@ export const ChatPage: React.FC = () => {
             {inputText.trim() ? (
               <button
                 type="submit"
-                className="w-10 h-10 rounded-full bg-[#0E2A6E] text-white flex items-center justify-center font-black hover:bg-[#081B47] active:scale-95 transition-transform shadow-md"
+                className="w-9 h-9 rounded-full bg-[#FFD700] text-[#1A1A2E] flex-shrink-0 flex items-center justify-center font-black hover:bg-yellow-300 active:scale-95 transition-transform shadow-md"
                 aria-label="Send message"
               >
                 ➤
@@ -1570,7 +1601,7 @@ export const ChatPage: React.FC = () => {
               <button
                 type="button"
                 onClick={startRecording}
-                className="w-10 h-10 rounded-full bg-[#0E2A6E] text-white flex items-center justify-center text-lg hover:bg-[#081B47] active:scale-95 transition-transform shadow-md"
+                className="w-9 h-9 rounded-full bg-[#FFD700] text-[#1A1A2E] flex-shrink-0 flex items-center justify-center hover:bg-yellow-300 active:scale-95 transition-transform shadow-md"
                 aria-label="Record voice note"
               >
                 🎤
@@ -1578,6 +1609,44 @@ export const ChatPage: React.FC = () => {
             )}
           </form>
         </footer>
+      )}
+
+      {showContactProfile && partnerProfile && (
+        <div className="fixed inset-0 z-[70] bg-black/55 flex items-center justify-center p-4" onClick={() => setShowContactProfile(false)}>
+          <section role="dialog" aria-modal="true" aria-label="Contact profile" className="w-full max-w-sm max-h-[85dvh] overflow-y-auto rounded-2xl bg-white dark:bg-[#161B2B] text-gray-900 dark:text-white shadow-2xl" onClick={(event) => event.stopPropagation()}>
+            <div className="chat-app-header flex items-center justify-between px-4 py-3">
+              <h3 className="text-sm font-bold">Contact info</h3>
+              <button type="button" onClick={() => setShowContactProfile(false)} aria-label="Close profile" className="p-1 rounded-full hover:bg-white/10"><X size={18} /></button>
+            </div>
+            <div className="p-5 text-center">
+              <Avatar name={partnerProfile.display_name || partnerProfile.username || 'Contact'} avatarUrl={partnerProfile.avatar_url || ''} size="lg" />
+              <h4 className="mt-3 text-lg font-bold">{partnerProfile.display_name}</h4>
+              <p className="text-sm text-gray-500 dark:text-gray-400">@{partnerProfile.username}</p>
+              {partnerProfile.bio && <p className="mt-2 text-sm">{partnerProfile.bio}</p>}
+            </div>
+            <div className="px-4 pb-4 space-y-2">
+              <label className="block text-xs font-semibold text-gray-500 dark:text-gray-400">Name you see (only you)</label>
+              <div className="flex gap-2">
+                <input value={contactAliasDraft} onChange={(event) => setContactAliasDraft(event.target.value)} maxLength={60} className="min-w-0 flex-1 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 px-3 py-2 text-sm" placeholder="Contact name" />
+                <button type="button" disabled={isSavingAlias} onClick={handleSaveContactAlias} className="rounded-lg bg-[#0E2A6E] px-3 py-2 text-xs font-bold text-white disabled:opacity-50">{isSavingAlias ? 'Saving…' : 'Save'}</button>
+              </div>
+              <div className="pt-3 border-t border-gray-200 dark:border-gray-700">
+                <h5 className="text-sm font-bold">Shared media, links and files</h5>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{sharedMedia.length} items in this conversation</p>
+                {sharedMedia.length === 0 ? <p className="py-4 text-xs text-gray-500">No shared media yet.</p> : (
+                  <div className="mt-2 space-y-1">
+                    {sharedMedia.slice(-30).reverse().map((item) => (
+                      <button key={item.id} type="button" onClick={async () => { const url = item.media_url && item.media_url.startsWith('http') ? item.media_url : await workerApi.getDownloadUrl(item.media_url || ''); if (url) window.open(url, '_blank', 'noopener,noreferrer'); else toast('This media could not be opened.', 'error'); }} className="w-full flex items-center gap-2 rounded-lg px-2 py-2 text-left hover:bg-gray-100 dark:hover:bg-gray-800">
+                        <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#FFD700] text-[#1A1A2E]">{item.message_type === 'image' ? <ImageIcon size={16} /> : <FileAudio size={16} />}</span>
+                        <span className="min-w-0 flex-1"><span className="block truncate text-xs font-semibold">{item.media_name || item.message_type.replace('_', ' ')}</span><span className="block text-[10px] text-gray-500">{new Date(item.created_at).toLocaleDateString()}</span></span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </section>
+        </div>
       )}
 
       {/* Feature 107: Thread Replies Drawer */}

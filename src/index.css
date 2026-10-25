@@ -16,7 +16,9 @@
   --color-on-accent: #1A1A2E;
   --chat-sent-bg: #0E2A6E;
   --chat-sent-text: #FFFFFF;
-  --chat-received-bg: #FFFFFF;
+  --color-header: #0E2A6E;
+  --color-footer: #0E2A6E;
+  --chat-received-bg: #FFD700;
   --chat-received-text: #000000;
 }
 
@@ -37,8 +39,10 @@
   --color-on-accent: #1A1A2E;
   --chat-sent-bg: #254BA8;
   --chat-sent-text: #FFFFFF;
-  --chat-received-bg: #161B2B;
-  --chat-received-text: #F5F7FA;
+  --color-header: #081B47;
+  --color-footer: #081B47;
+  --chat-received-bg: #FFD700;
+  --chat-received-text: #000000;
 }
 
 /* Feature 139: Custom App Accent Themes */
@@ -99,6 +103,11 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+/* Consistent compact mobile sizing and shared Inspire chrome */
+.chat-app-header { background: var(--color-header); color: #fff; border-color: transparent; }
+.chat-app-footer { background: var(--color-footer); color: #fff; border-color: rgba(255,255,255,.16); }
+.chat-received-bubble { background: var(--chat-received-bg); color: var(--chat-received-text); border-color: transparent; }
+.chat-sent-bubble { background: var(--chat-sent-bg); color: var(--chat-sent-text); }
 /* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 6px;

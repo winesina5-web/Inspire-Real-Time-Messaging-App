@@ -596,14 +596,14 @@ export const ChatListPage: React.FC = () => {
   return (
     <div className="min-h-screen bg-white dark:bg-[#0B0F1A] text-black dark:text-white pb-24">
       {/* Top Header */}
-      <header className="sticky top-0 z-30 bg-white/95 dark:bg-[#0B0F1A]/95 backdrop-blur-md border-b border-[#E5E7EB] dark:border-[#2A3348] px-4 py-3">
+      <header className="chat-app-header sticky top-0 z-30 px-3 py-2 border-b border-white/15">
         <div className="max-w-md mx-auto flex items-center justify-between">
           <div className="flex items-center space-x-3">
             <div className="w-10 h-10 rounded-2xl bg-[#0E2A6E] flex items-center justify-center text-[#FFD700] text-xl font-black shadow-md">
               💬
             </div>
             <div>
-              <h1 className="text-xl font-extrabold tracking-tight text-black dark:text-white leading-tight">
+              <h1 className="text-lg font-bold tracking-tight text-white leading-tight">
                 Inspire
               </h1>
               <span className="text-[11px] font-bold text-[#4B5563] dark:text-[#9CA3AF]">
