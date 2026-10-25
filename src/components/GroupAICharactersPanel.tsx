@@ -57,7 +57,7 @@ export const GroupAICharactersPanel: React.FC<Props> = ({ groupId, userId, onClo
         behavior: character.behavior,
         scenario: character.scenario,
         speaking_style: character.speakingStyle,
-        avatar_url: character.avatarUrl?.startsWith('https://') ? character.avatarUrl : null,
+        avatar_url: character.avatarUrl && (character.avatarUrl.startsWith('https://') || character.avatarUrl.startsWith('data:image/jpeg;base64,')) ? character.avatarUrl : null,
         trigger_mode: character.groupParticipation,
         is_active: true,
         language: character.language,
