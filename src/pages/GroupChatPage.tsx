@@ -11,6 +11,7 @@ import { PaymentSplitModal } from '../components/PaymentSplitModal';
 import { Group, Message, Profile, PollData, GroupEvent, PaymentSplit } from '../types';
 import { supabase, isConfigured } from '../lib/supabaseClient';
 import { GroupAICharactersPanel } from '../components/GroupAICharactersPanel';
+import { GroupMembersPanel } from '../components/GroupMembersPanel';
 import { GroupAICharacter, loadCharacters } from '../lib/aiCharacters';
 import { workerApi } from '../lib/workerApi';
 
@@ -32,6 +33,7 @@ export const GroupChatPage: React.FC = () => {
   const [showSplitModal, setShowPaymentSplitModal] = useState(false);
   const [activeThreadMessage, setActiveThreadMessage] = useState<Message | null>(null);
   const [showAICharactersPanel, setShowAICharactersPanel] = useState(false);
+  const [showMembersPanel, setShowMembersPanel] = useState(false);
   const [groupAICharacters, setGroupAICharacters] = useState<GroupAICharacter[]>([]);
   const groupAICharactersRef = useRef<GroupAICharacter[]>([]);
   const messagesRef = useRef<Message[]>([]);
@@ -177,6 +179,12 @@ export const GroupChatPage: React.FC = () => {
             .eq('user_id', user.id)
             .maybeSingle();
 
+          // Use the actual human membership count, not the configured maximum.
+          const { count: humanMemberCount } = await supabase
+            .from('group_members')
+            .select('user_id', { count: 'exact', head: true })
+            .eq('group_id', groupId);
+
           // Check slow mode settings
           const { data: slowData } = await supabase
             .from('slow_mode_settings')
@@ -194,7 +202,7 @@ export const GroupChatPage: React.FC = () => {
             avatar_url: grpData.avatar_url,
             created_by: grpData.created_by,
             created_at: grpData.created_at,
-            members_count: grpData.max_members || 1,
+            members_count: humanMemberCount || 1,
             role: memberData?.role || 'member',
             slow_mode_interval: interval,
           });
@@ -523,6 +531,7 @@ export const GroupChatPage: React.FC = () => {
 
         {/* Action icons */}
         <div className="flex items-center space-x-1">
+          <button onClick={() => setShowMembersPanel(true)} className="p-2 rounded-full hover:bg-blue-50 dark:hover:bg-blue-950/40 text-sm" title="Manage real group members">👥</button>
           <button onClick={() => setShowAICharactersPanel(true)} className="p-2 rounded-full hover:bg-violet-50 dark:hover:bg-violet-950/40 text-sm" title="Manage AI group members">🎭</button>
           <button
             onClick={() => setShowGroupEventModal(true)}
@@ -667,6 +676,16 @@ export const GroupChatPage: React.FC = () => {
             </button>
           </div>
         </div>
+      )}
+
+      {showMembersPanel && groupId && user && (
+        <GroupMembersPanel
+          groupId={groupId}
+          currentUserId={user.id}
+          currentRole={group.role}
+          onClose={() => setShowMembersPanel(false)}
+          onMembershipChanged={(count) => setGroup((current) => current ? { ...current, members_count: count } : current)}
+        />
       )}
 
       {/* Modals */}
