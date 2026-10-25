@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { BottomNav } from '../components/BottomNav';
 import { Avatar } from '../components/Avatar';
 import { useAuth } from '../hooks/useAuth';
@@ -8,6 +9,7 @@ import { supabase, isConfigured } from '../lib/supabaseClient';
 
 export const StatusPage: React.FC = () => {
   const { user } = useAuth();
+  const [searchParams] = useSearchParams();
   const { toast } = useToast();
 
   const [statuses, setStatuses] = useState<StatusPost[]>([]);
@@ -86,6 +88,13 @@ export const StatusPage: React.FC = () => {
   useEffect(() => {
     loadStatuses();
   }, [user]);
+
+  useEffect(() => {
+    const targetUserId = searchParams.get('userId');
+    if (!targetUserId || loading) return;
+    const targetStatus = statuses.find((item) => item.user_id === targetUserId);
+    if (targetStatus) setActiveStory(targetStatus);
+  }, [searchParams, statuses, loading]);
 
   const handleOpenStory = async (st: StatusPost) => {
     setActiveStory(st);
