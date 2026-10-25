@@ -233,7 +233,8 @@ export function useMessages(partnerId: string) {
     messageType: MessageType = 'text',
     mediaDetails?: { url: string; size?: number; name?: string },
     replyToId?: string,
-    scheduledFor?: string
+    scheduledFor?: string,
+    expiresAt?: string
   ): Promise<Message | null> => {
     if (!user || !partnerId) return null;
 
@@ -254,6 +255,7 @@ export function useMessages(partnerId: string) {
       read_at: null,
       created_at: new Date().toISOString(),
       scheduled_for: scheduledFor || null,
+      expires_at: expiresAt || null,
       reactions: [],
       delivery_status: 'sending',
       reply_to: replyToId ? messages.find((m) => m.id === replyToId) || null : null,
@@ -279,6 +281,7 @@ export function useMessages(partnerId: string) {
           media_name: mediaDetails?.name || null,
           reply_to_id: replyToId || null,
           scheduled_for: scheduledFor || null,
+          expires_at: expiresAt || null,
         })
         .select()
         .single();
