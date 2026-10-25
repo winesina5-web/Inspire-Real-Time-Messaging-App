@@ -8,6 +8,7 @@
   },
   "vars": {
     "ALLOWED_ORIGINS": "http://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,https://inspire-real-time-messaging-app.pages.dev",
-    "SUPABASE_URL": "https://fbilthpfejkgqtvgptet.supabase.co"
+    "SUPABASE_URL": "https://fbilthpfejkgqtvgptet.supabase.co",
+    "SUPABASE_ANON_KEY": "sb_publishable_IFL2V0gxDpn6FDumM0XUnA_NB8L6AxK"
   }
 }
