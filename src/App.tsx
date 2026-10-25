@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './hooks/useAuth';
+import { supabase, isConfigured } from './lib/supabaseClient';
 import { ToastProvider } from './components/Toast';
 import { InstallPrompt } from './components/InstallPrompt';
 import { IncomingCallListener } from './components/IncomingCallListener';
@@ -516,7 +517,7 @@ function IncomingMessageNotifications() {
         schema: 'public',
         table: 'messages',
         filter: `receiver_id=eq.${user.id}`,
-      }, async (payload) => {
+      }, async (payload: any) => {
         const message = payload.new as { id?: string; sender_id?: string; receiver_id?: string; content?: string | null; message_type?: string; is_deleted_receiver?: boolean };
         if (!message.sender_id || message.receiver_id !== user.id || message.is_deleted_receiver) return;
         if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
@@ -530,7 +531,6 @@ function IncomingMessageNotifications() {
               badge: '/icon-192.svg',
               tag: `inspire-message-${message.id || Date.now()}`,
               data: { url: `/chat/${message.sender_id}` },
-              renotify: false,
             });
           } else {
             new Notification('New message', { body });
