@@ -31,5 +31,7 @@ jobs:
         run: npm run lint
       - name: Run unit and Worker security tests
         run: npm test
+      - name: Validate deployed Worker source syntax
+        run: node --check worker/src/standalone.js
       - name: Build frontend
         run: npm run build
