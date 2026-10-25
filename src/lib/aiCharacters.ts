@@ -37,6 +37,10 @@ export interface GroupAICharacter {
   avatar_url: string | null;
   trigger_mode: 'mentioned_or_relevant' | 'mentioned_only' | 'every_message';
   is_active: boolean;
+  language: string;
+  temperature: number;
+  response_length: 'short' | 'balanced' | 'detailed';
+  sample_dialogue: string;
   last_spoke_at?: string | null;
 }
 
